@@ -117,6 +117,8 @@ func (s *Server) handleRequest(req Request) (interface{}, error) {
 		return s.disconnectAll()
 	case "test_connection":
 		return s.testConnection(req.Params)
+	case "sudo_write":
+		return s.sudoWrite(req.Params)
 	default:
 		return nil, fmt.Errorf("unknown method: %s", req.Method)
 	}
@@ -374,6 +376,42 @@ func (s *Server) testConnection(params json.RawMessage) (interface{}, error) {
 	}
 
 	err := mount.TestConnection(p.Host, p.Port, p.User, p.IdentityFile, p.Password)
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		}, nil
+	}
+
+	return map[string]interface{}{
+		"success": true,
+	}, nil
+}
+
+type sudoWriteParam struct {
+	Name       string `json:"name"`
+	LocalFile  string `json:"local_file"`
+	RemotePath string `json:"remote_path"`
+	Password   string `json:"password"`
+}
+
+func (s *Server) sudoWrite(params json.RawMessage) (interface{}, error) {
+	var p sudoWriteParam
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := cfg.Get(p.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	err = mount.SudoWrite(conn.Host, conn.Port, conn.User, p.LocalFile, p.RemotePath, p.Password)
 	if err != nil {
 		return map[string]interface{}{
 			"success": false,

@@ -731,7 +731,7 @@ function M.sudo_write()
     end
     remote_path = remote_path .. remote_file
     
-    -- Use scp with sudo
+    -- Use RPC to handle sudo write
     ui.password({ prompt = "Sudo password for " .. conn.name }, function(password)
       if not password then
         vim.fn.delete(tmp_file)
@@ -739,35 +739,26 @@ function M.sudo_write()
         return
       end
       
-      local scp_cmd = string.format(
-        "sshpass -p %q scp -o StrictHostKeyChecking=no -P %d %s %s@%s:/tmp/sshinator_sudo_tmp && " ..
-        "sshpass -p %q ssh -o StrictHostKeyChecking=no -p %d %s@%s 'echo %q | sudo -S mv /tmp/sshinator_sudo_tmp %s'",
-        password,
-        conn.port or 22,
-        tmp_file,
-        conn.user,
-        conn.host,
-        password,
-        conn.port or 22,
-        conn.user,
-        conn.host,
-        password,
-        remote_path
-      )
-      
-      vim.fn.jobstart(scp_cmd, {
-        on_exit = function(_, code)
-          vim.fn.delete(tmp_file)
+      c:call("sudo_write", {
+        name = conn_name,
+        local_file = tmp_file,
+        remote_path = remote_path,
+        password = password,
+      }, function(write_err, result)
+        vim.fn.delete(tmp_file)
+        if write_err then
+          ui.notify("sshinator: " .. write_err, vim.log.levels.ERROR)
+          return
+        end
+        if result and result.success then
+          ui.notify("sshinator: file written with sudo", vim.log.levels.INFO)
           vim.schedule(function()
-            if code == 0 then
-              ui.notify("sshinator: file written with sudo", vim.log.levels.INFO)
-              vim.cmd("edit!")
-            else
-              ui.notify("sshinator: sudo write failed (exit code " .. code .. ")", vim.log.levels.ERROR)
-            end
+            vim.cmd("edit!")
           end)
-        end,
-      })
+        else
+          ui.notify("sshinator: sudo write failed: " .. (result and result.error or "unknown error"), vim.log.levels.ERROR)
+        end
+      end)
     end)
   end)
 end
