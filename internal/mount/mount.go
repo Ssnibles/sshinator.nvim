@@ -45,6 +45,17 @@ func MountDir(name string) (string, error) {
 		dataDir = filepath.Join(home, ".local", "share")
 	}
 	dir := filepath.Join(dataDir, "sshinator", "mounts", name)
+	
+	// Check if path exists and is not a directory
+	if info, err := os.Stat(dir); err == nil {
+		if !info.IsDir() {
+			// Remove file if it exists
+			if err := os.Remove(dir); err != nil {
+				return "", fmt.Errorf("failed to remove file at mount dir: %w", err)
+			}
+		}
+	}
+	
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create mount dir: %w", err)
 	}
