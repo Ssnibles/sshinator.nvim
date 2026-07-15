@@ -1,12 +1,14 @@
 package mount
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 type PasswordRequiredError struct {
@@ -82,23 +84,30 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 		"-o", "ServerAliveCountMax=3",
 		"-o", "reconnect",
 		"-o", "follow_symlinks",
+		"-o", "ConnectTimeout=10",
 	}
 
 	if identityFile != "" {
 		args = append(args, "-o", fmt.Sprintf("IdentityFile=%s", identityFile))
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	if password != "" {
 		args = append(args, "-o", "password_stdin")
-		cmd = exec.Command("sshfs", args...)
+		cmd = exec.CommandContext(ctx, "sshfs", args...)
 		cmd.Stdin = strings.NewReader(password + "\n")
 	} else {
-		cmd = exec.Command("sshfs", args...)
+		cmd = exec.CommandContext(ctx, "sshfs", args...)
 	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("sshfs connection timed out after 30 seconds")
+		}
 		outputStr := string(output)
 		if password == "" && isPasswordError(outputStr, err) {
 			return "", &PasswordRequiredError{Name: name}
