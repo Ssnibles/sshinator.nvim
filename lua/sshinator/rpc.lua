@@ -52,16 +52,9 @@ function Client:start()
 end
 
 function Client:handle_stdout(data)
-  local chunks = {}
-  if self.buffer ~= "" then
-    table.insert(chunks, self.buffer)
-    self.buffer = ""
-  end
-  for _, chunk in ipairs(data) do
-    table.insert(chunks, chunk)
-  end
-
-  local combined = table.concat(chunks)
+  local combined = self.buffer .. table.concat(data, "\n")
+  self.buffer = ""
+  
   local start = 1
   while true do
     local newline_pos = combined:find("\n", start, true)
