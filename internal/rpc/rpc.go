@@ -34,11 +34,15 @@ type Server struct {
 }
 
 func NewServer() *Server {
-	logFile, _ := os.OpenFile("/tmp/sshinator.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile("/tmp/sshinator.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	var logWriter io.Writer = io.Discard
+	if err == nil {
+		logWriter = logFile
+	}
 	return &Server{
 		reader: bufio.NewReader(os.Stdin),
 		writer: os.Stdout,
-		logger: log.New(logFile, "[sshinator] ", log.LstdFlags),
+		logger: log.New(logWriter, "[sshinator] ", log.LstdFlags),
 		mounts: mount.NewMountState(),
 	}
 }
@@ -71,15 +75,17 @@ func (s *Server) Run() {
 		}
 
 		s.logger.Printf("request: id=%d method=%s", req.ID, req.Method)
-		result, err := s.handleRequest(req)
-		resp := Response{ID: req.ID}
-		if err != nil {
-			resp.Error = err.Error()
-			s.logger.Printf("error: %v", err)
-		} else {
-			resp.Result = result
-		}
-		s.sendResponse(resp)
+		go func(req Request) {
+			result, err := s.handleRequest(req)
+			resp := Response{ID: req.ID}
+			if err != nil {
+				resp.Error = err.Error()
+				s.logger.Printf("error: %v", err)
+			} else {
+				resp.Result = result
+			}
+			s.sendResponse(resp)
+		}(req)
 	}
 }
 
