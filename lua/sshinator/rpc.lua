@@ -42,12 +42,22 @@ function Client:start()
 end
 
 function Client:handle_stdout(data)
-  for _, line in ipairs(data) do
-    if line ~= "" then
-      self.buffer = self.buffer .. line
-      local ok, decoded = pcall(vim.fn.json_decode, self.buffer)
+  for _, chunk in ipairs(data) do
+    self.buffer = self.buffer .. chunk
+  end
+
+  while true do
+    local newline_pos = self.buffer:find("\n")
+    if not newline_pos then
+      break
+    end
+
+    local json_line = self.buffer:sub(1, newline_pos - 1)
+    self.buffer = self.buffer:sub(newline_pos + 1)
+
+    if json_line ~= "" then
+      local ok, decoded = pcall(vim.fn.json_decode, json_line)
       if ok then
-        self.buffer = ""
         local id = decoded.id
         local cb = self.callbacks[id]
         if cb then
