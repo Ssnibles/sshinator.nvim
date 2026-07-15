@@ -3,25 +3,57 @@ local rpc = require("sshinator.rpc")
 local ui = require("sshinator.ui")
 
 local client = nil
+local binary_path = nil
+
+local config = {
+  auto_check_deps = true,
+  notify_duration = 5000,
+  request_timeout = 30000,
+}
+
+function M.get_binary_path()
+  if binary_path then
+    return binary_path
+  end
+  local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
+  local binary = plugin_root .. "/bin/sshinator"
+  if vim.fn.executable(binary) == 0 then
+    binary = "sshinator"
+  end
+  if vim.fn.executable(binary) == 0 then
+    return nil
+  end
+  binary_path = binary
+  return binary_path
+end
+
+function M._get_client()
+  return client
+end
 
 local function get_client()
-  if not client or not client:is_running() then
-    local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
-    local binary = plugin_root .. "/bin/sshinator"
-    if vim.fn.executable(binary) == 0 then
-      binary = "sshinator"
-    end
-    if vim.fn.executable(binary) == 0 then
-      error("sshinator binary not found. Run 'make build' first.")
-    end
-    client = rpc.new_client(binary)
+  if client and client:is_running() then
+    return client
   end
+  local binary = M.get_binary_path()
+  if not binary then
+    return nil, "sshinator binary not found. Run 'make build' first."
+  end
+  client = rpc.new_client(binary, { request_timeout = config.request_timeout })
   return client
 end
 
 function M.setup(opts)
   opts = opts or {}
-  if opts.auto_check_deps ~= false then
+  config.auto_check_deps = opts.auto_check_deps ~= false
+  config.notify_duration = opts.notify_duration or 5000
+  config.request_timeout = opts.request_timeout or 30000
+
+  ui.configure({
+    notify_duration = config.notify_duration,
+  })
+
+  if config.auto_check_deps then
     vim.defer_fn(function()
       M.check_deps()
     end, 1000)
@@ -29,10 +61,14 @@ function M.setup(opts)
 end
 
 function M.check_deps()
-  local c = get_client()
-  c:call("check_deps", {}, function(err, result)
-    if err then
-      ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  c:call("check_deps", {}, function(call_err, result)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
       return
     end
     if not result.ok then
@@ -50,7 +86,7 @@ function M.add_connection(opts)
     { key = "user", prompt = "User", default = opts.user or vim.env.USER or "", required = true },
     { key = "port", prompt = "Port", default = tostring(opts.port or 22) },
     { key = "remote_path", prompt = "Remote Path", default = opts.remote_path or "." },
-    { key = "identity_file", prompt = "Identity File (leave empty to skip)" , default = opts.identity_file or "" },
+    { key = "identity_file", prompt = "Identity File (leave empty to skip)", default = opts.identity_file or "" },
     { key = "password_auth", prompt = "Use password auth? (y/n)", default = "n" },
   }
 
@@ -67,10 +103,14 @@ function M.add_connection(opts)
       password_auth = results.password_auth and results.password_auth:lower() == "y",
     }
 
-    local c = get_client()
-    c:call("add_connection", conn, function(err, result)
-      if err then
-        ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    local c, client_err = get_client()
+    if not c then
+      ui.notify("sshinator: " .. client_err, vim.log.levels.ERROR)
+      return
+    end
+    c:call("add_connection", conn, function(call_err, result)
+      if call_err then
+        ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
       else
         ui.notify("sshinator: added connection '" .. conn.name .. "'", vim.log.levels.INFO)
       end
@@ -79,10 +119,14 @@ function M.add_connection(opts)
 end
 
 function M.remove_connection()
-  local c = get_client()
-  c:call("list_connections", {}, function(err, connections)
-    if err then
-      ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  c:call("list_connections", {}, function(call_err, connections)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
       return
     end
     if not connections or #connections == 0 then
@@ -108,9 +152,9 @@ function M.remove_connection()
 end
 
 local function do_connect(c, name)
-  c:call("connect", { name = name }, function(err, result)
-    if err then
-      ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+  c:call("connect", { name = name }, function(call_err, result)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
       return
     end
 
@@ -142,10 +186,14 @@ local function do_connect(c, name)
 end
 
 function M.connect()
-  local c = get_client()
-  c:call("list_connections", {}, function(err, connections)
-    if err then
-      ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  c:call("list_connections", {}, function(call_err, connections)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
       return
     end
     if not connections or #connections == 0 then
@@ -166,10 +214,14 @@ function M.connect()
 end
 
 function M.disconnect()
-  local c = get_client()
-  c:call("list_mounted", {}, function(err, mounted)
-    if err then
-      ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  c:call("list_mounted", {}, function(call_err, mounted)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
       return
     end
     if not mounted or vim.tbl_isempty(mounted) then
@@ -195,10 +247,14 @@ function M.disconnect()
 end
 
 function M.disconnect_all()
-  local c = get_client()
-  c:call("disconnect_all", {}, function(err, result)
-    if err then
-      ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  c:call("disconnect_all", {}, function(call_err, result)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
     else
       ui.notify("sshinator: all connections disconnected", vim.log.levels.INFO)
     end
@@ -206,10 +262,14 @@ function M.disconnect_all()
 end
 
 function M.status()
-  local c = get_client()
-  c:call("list_connections", {}, function(err, connections)
-    if err then
-      ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  c:call("list_connections", {}, function(call_err, connections)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
       return
     end
     if not connections or #connections == 0 then
@@ -229,11 +289,50 @@ function M.status()
   end)
 end
 
+function M.reconnect()
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  c:call("list_mounted", {}, function(call_err, mounted)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
+      return
+    end
+    if not mounted or vim.tbl_isempty(mounted) then
+      ui.notify("sshinator: no active mounts to reconnect", vim.log.levels.INFO)
+      return
+    end
+    local items = {}
+    for name, path in pairs(mounted) do
+      table.insert(items, string.format("%s (%s)", name, path))
+    end
+    ui.select(items, { prompt = "Reconnect" }, function(choice)
+      if not choice then return end
+      local name = choice:match("^(%S+)")
+      c:call("disconnect", { name = name }, function(err2)
+        if err2 then
+          ui.notify("sshinator: disconnect failed: " .. err2, vim.log.levels.ERROR)
+          return
+        end
+        vim.defer_fn(function()
+          do_connect(c, name)
+        end, 100)
+      end)
+    end)
+  end)
+end
+
 function M.list_connections()
-  local c = get_client()
-  c:call("list_connections", {}, function(err, connections)
-    if err then
-      ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  c:call("list_connections", {}, function(call_err, connections)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
       return
     end
     if not connections or #connections == 0 then
@@ -251,6 +350,7 @@ function M.list_connections()
       local actions = {
         "Connect",
         "Disconnect",
+        "Reconnect",
         "Status",
         "Remove",
       }
@@ -265,6 +365,16 @@ function M.list_connections()
             else
               ui.notify("sshinator: disconnected '" .. name .. "'", vim.log.levels.INFO)
             end
+          end)
+        elseif action == "Reconnect" then
+          c:call("disconnect", { name = name }, function(err2)
+            if err2 then
+              ui.notify("sshinator: disconnect failed: " .. err2, vim.log.levels.ERROR)
+              return
+            end
+            vim.defer_fn(function()
+              do_connect(c, name)
+            end, 100)
           end)
         elseif action == "Status" then
           c:call("status", { name = name }, function(err2, result)
