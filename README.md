@@ -28,8 +28,8 @@ Add to your Neovim configuration:
 
 ```nix
 {
-  inputs.sshinator.url = "github:yourusername/sshinator.nvim";
-  
+  inputs.sshinator.url = "github:Ssnibles/sshinator.nvim";
+
   # In your neovim plugins list:
   extraPlugins = [ inputs.sshinator.packages.${system}.default ];
 }
@@ -47,7 +47,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 {
-  "yourusername/sshinator.nvim",
+  "Ssnibles/sshinator.nvim",
   build = "make build",
   config = function()
     require("sshinator").setup()
@@ -59,7 +59,7 @@ With [packer.nvim](https://github.com/wbthomason/packer.nvim):
 
 ```lua
 use {
-  "yourusername/sshinator.nvim",
+  "Ssnibles/sshinator.nvim",
   run = "make build",
   config = function()
     require("sshinator").setup()
@@ -70,7 +70,7 @@ use {
 ### Manual Installation
 
 ```bash
-git clone https://github.com/yourusername/sshinator.nvim
+git clone https://github.com/Ssnibles/sshinator.nvim
 cd sshinator.nvim
 make build
 ```
@@ -115,21 +115,27 @@ For hosts that require password authentication:
 ### Example Workflow
 
 1. Add a connection:
+
    ```
    :SshinatorAdd
    ```
+
    Follow the floating window prompts to enter name, host, user, port, remote path, optional identity file, and whether to use password authentication.
 
 2. Connect to a host:
+
    ```
    :SshinatorConnect
    ```
+
    Select from your configured connections using the floating window picker. If the connection requires a password, you'll be prompted securely. The remote filesystem will be mounted and opened in Neovim.
 
 3. View mounted connections:
+
    ```
    :SshinatorStatus
    ```
+
    A floating window dashboard shows all connections with their current mount status.
 
 4. Disconnect:
