@@ -12,7 +12,7 @@ function M.new_client(binary, opts)
   self.callbacks = {}
   self.timers = {}
   self.buffer = ""
-  self.request_timeout = opts.request_timeout or 30000
+  self.request_timeout = opts.request_timeout or 60000
   self:start()
   return self
 end
