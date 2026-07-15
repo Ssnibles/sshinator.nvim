@@ -21,9 +21,13 @@ func NewMountState() *MountState {
 }
 
 func MountDir(name string) (string, error) {
-	dataDir, err := os.UserDataDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to get data dir: %w", err)
+		return "", fmt.Errorf("failed to get home dir: %w", err)
+	}
+	dataDir := os.Getenv("XDG_DATA_HOME")
+	if dataDir == "" {
+		dataDir = filepath.Join(home, ".local", "share")
 	}
 	dir := filepath.Join(dataDir, "sshinator", "mounts", name)
 	if err := os.MkdirAll(dir, 0755); err != nil {
