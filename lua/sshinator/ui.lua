@@ -60,8 +60,9 @@ local function create_float(opts)
   local pos = calc_center(width, height)
 
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
-  vim.api.nvim_set_option_value("filetype", "sshinator", { buf = buf })
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].filetype = "sshinator"
 
   local win = vim.api.nvim_open_win(buf, true, {
     relative = "editor",
@@ -73,16 +74,17 @@ local function create_float(opts)
     border = "rounded",
     title = opts.title and (" " .. opts.title .. " ") or nil,
     title_pos = opts.title and "center" or nil,
+    noautocmd = true,
   })
 
-  vim.api.nvim_set_option_value("winhl", "FloatBorder:" .. hl_groups.border .. ",FloatTitle:" .. hl_groups.title, { win = win })
+  vim.api.nvim_set_option_value("winhl", "FloatBorder:" .. hl_groups.border .. ",FloatTitle:" .. hl_groups.title, { win = win, scope = "local" })
 
   return buf, win
 end
 
 local function close_float(win, buf)
   if win and vim.api.nvim_win_is_valid(win) then
-    vim.api.nvim_win_close(win, true)
+    pcall(vim.api.nvim_win_close, win, true)
   end
 end
 
@@ -98,12 +100,15 @@ function M.input(opts, callback)
     height = 1,
   })
 
-  vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+  vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { default })
-  vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
   vim.cmd("startinsert!")
 
+  local submitted = false
+
   local function submit()
+    if submitted then return end
+    submitted = true
     local value = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or ""
     close_float(win, buf)
     vim.cmd("stopinsert")
@@ -111,6 +116,8 @@ function M.input(opts, callback)
   end
 
   local function cancel()
+    if submitted then return end
+    submitted = true
     close_float(win, buf)
     vim.cmd("stopinsert")
     callback(nil)
@@ -121,6 +128,13 @@ function M.input(opts, callback)
   vim.keymap.set("i", "<Esc>", cancel, { buffer = buf, noremap = true })
   vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, noremap = true })
   vim.keymap.set("n", "q", cancel, { buffer = buf, noremap = true })
+
+  vim.api.nvim_create_autocmd("BufLeave", {
+    buffer = buf,
+    nested = true,
+    once = true,
+    callback = cancel,
+  })
 end
 
 function M.password(opts, callback)
@@ -135,25 +149,33 @@ function M.password(opts, callback)
   })
 
   local real_value = ""
-  vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+  vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "" })
   vim.cmd("startinsert!")
 
+  local submitted = false
+
   local function update_display()
-    vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+    vim.bo[buf].modifiable = true
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { string.rep("*", #real_value) })
-    vim.cmd("startinsert!")
-    vim.api.nvim_win_set_cursor(win, { 1, #real_value })
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_set_cursor(win, { 1, #real_value })
+    end
   end
 
   local function submit()
+    if submitted then return end
+    submitted = true
     local val = real_value
+    real_value = ""
     close_float(win, buf)
     vim.cmd("stopinsert")
     callback(val ~= "" and val or nil)
   end
 
   local function cancel()
+    if submitted then return end
+    submitted = true
     real_value = ""
     close_float(win, buf)
     vim.cmd("stopinsert")
@@ -186,12 +208,11 @@ function M.password(opts, callback)
     end
   end, { buffer = buf, noremap = true })
 
-  vim.api.nvim_create_autocmd({ "BufWipeout", "BufHidden" }, {
+  vim.api.nvim_create_autocmd("BufLeave", {
     buffer = buf,
+    nested = true,
     once = true,
-    callback = function()
-      real_value = ""
-    end,
+    callback = cancel,
   })
 end
 
@@ -221,6 +242,7 @@ function M.select(items, opts, callback)
   })
 
   local selected_idx = 1
+  local submitted = false
 
   local function render()
     local lines = {}
@@ -233,9 +255,9 @@ function M.select(items, opts, callback)
       end
       table.insert(lines, line)
     end
-    vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+    vim.bo[buf].modifiable = true
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-    vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+    vim.bo[buf].modifiable = false
 
     vim.api.nvim_buf_clear_namespace(buf, get_ns_id(), 0, -1)
     for i = 1, #lines do
@@ -248,12 +270,16 @@ function M.select(items, opts, callback)
   render()
 
   local function submit()
+    if submitted then return end
+    submitted = true
     local choice = items[selected_idx]
     close_float(win, buf)
     callback(choice)
   end
 
   local function cancel()
+    if submitted then return end
+    submitted = true
     close_float(win, buf)
     callback(nil)
   end
@@ -294,6 +320,13 @@ function M.select(items, opts, callback)
       submit()
     end, { buffer = buf, noremap = true })
   end
+
+  vim.api.nvim_create_autocmd("BufLeave", {
+    buffer = buf,
+    nested = true,
+    once = true,
+    callback = cancel,
+  })
 end
 
 function M.notify(msg, level)
@@ -323,9 +356,9 @@ function M.notify(msg, level)
     height = height,
   })
 
-  vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+  vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+  vim.bo[buf].modifiable = false
 
   local hl = hl_groups.header
   if level == vim.log.levels.ERROR then
@@ -393,9 +426,9 @@ function M.status_window(connections, mounted)
     height = height,
   })
 
-  vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+  vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+  vim.bo[buf].modifiable = false
 
   for _, h in ipairs(highlights) do
     vim.api.nvim_buf_add_highlight(buf, get_ns_id(), h.group, h.line, 0, -1)
