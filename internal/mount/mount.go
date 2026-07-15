@@ -231,6 +231,46 @@ func HasSshpass() bool {
 	return err == nil
 }
 
+func TestConnection(host string, port int, user, identityFile, password string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	args := []string{
+		"-p", fmt.Sprintf("%d", port),
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "ConnectTimeout=10",
+		"-o", "BatchMode=yes",
+		fmt.Sprintf("%s@%s", user, host),
+		"exit",
+	}
+
+	var cmd *exec.Cmd
+	if password != "" {
+		if sshpassPath, err := exec.LookPath("sshpass"); err == nil {
+			sshpassArgs := []string{"-p", password, "ssh"}
+			sshpassArgs = append(sshpassArgs, args...)
+			cmd = exec.CommandContext(ctx, sshpassPath, sshpassArgs...)
+		} else {
+			return fmt.Errorf("password authentication requires sshpass")
+		}
+	} else {
+		if identityFile != "" {
+			args = append([]string{"-i", identityFile}, args...)
+		}
+		cmd = exec.CommandContext(ctx, "ssh", args...)
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("connection timed out after 15 seconds")
+		}
+		return fmt.Errorf("connection failed: %s", string(output))
+	}
+
+	return nil
+}
+
 func (ms *MountState) StatusString(name string) string {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()

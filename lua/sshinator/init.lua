@@ -108,13 +108,60 @@ function M.add_connection(opts)
       ui.notify("sshinator: " .. client_err, vim.log.levels.ERROR)
       return
     end
-    c:call("add_connection", conn, function(call_err, result)
-      if call_err then
-        ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
-      else
-        ui.notify("sshinator: added connection '" .. conn.name .. "'", vim.log.levels.INFO)
-      end
-    end)
+
+    local function save_and_test()
+      c:call("add_connection", conn, function(call_err, result)
+        if call_err then
+          ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
+          return
+        end
+
+        ui.confirm({ prompt = "Test connection?" }, function(test)
+          if test == nil or test == false then
+            ui.notify("sshinator: added connection '" .. conn.name .. "'", vim.log.levels.INFO)
+            return
+          end
+
+          local test_params = {
+            host = conn.host,
+            port = conn.port,
+            user = conn.user,
+            identity_file = conn.identity_file,
+          }
+
+          if conn.password_auth then
+            ui.password({ prompt = "Password for " .. conn.name }, function(password)
+              if not password then
+                ui.notify("sshinator: added connection '" .. conn.name .. "' (not tested)", vim.log.levels.INFO)
+                return
+              end
+              test_params.password = password
+              c:call("test_connection", test_params, function(test_err, test_result)
+                if test_err then
+                  ui.notify("sshinator: test failed: " .. test_err, vim.log.levels.ERROR)
+                elseif test_result.success then
+                  ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
+                else
+                  ui.notify("sshinator: connection test failed: " .. (test_result.error or "unknown error"), vim.log.levels.ERROR)
+                end
+              end)
+            end)
+          else
+            c:call("test_connection", test_params, function(test_err, test_result)
+              if test_err then
+                ui.notify("sshinator: test failed: " .. test_err, vim.log.levels.ERROR)
+              elseif test_result.success then
+                ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
+              else
+                ui.notify("sshinator: connection test failed: " .. (test_result.error or "unknown error"), vim.log.levels.ERROR)
+              end
+            end)
+          end
+        end)
+      end)
+    end
+
+    save_and_test()
   end)
 end
 

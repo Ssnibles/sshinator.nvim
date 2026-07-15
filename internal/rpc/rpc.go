@@ -115,6 +115,8 @@ func (s *Server) handleRequest(req Request) (interface{}, error) {
 		return s.checkDeps()
 	case "disconnect_all":
 		return s.disconnectAll()
+	case "test_connection":
+		return s.testConnection(req.Params)
 	default:
 		return nil, fmt.Errorf("unknown method: %s", req.Method)
 	}
@@ -351,4 +353,35 @@ func (s *Server) checkDeps() (interface{}, error) {
 func (s *Server) disconnectAll() (interface{}, error) {
 	s.mounts.UnmountAll()
 	return map[string]string{"status": "all disconnected"}, nil
+}
+
+type testConnectionParam struct {
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	User         string `json:"user"`
+	IdentityFile string `json:"identity_file,omitempty"`
+	Password     string `json:"password,omitempty"`
+}
+
+func (s *Server) testConnection(params json.RawMessage) (interface{}, error) {
+	var p testConnectionParam
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+
+	if p.Port == 0 {
+		p.Port = 22
+	}
+
+	err := mount.TestConnection(p.Host, p.Port, p.User, p.IdentityFile, p.Password)
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		}, nil
+	}
+
+	return map[string]interface{}{
+		"success": true,
+	}, nil
 }
