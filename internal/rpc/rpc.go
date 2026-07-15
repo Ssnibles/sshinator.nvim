@@ -231,13 +231,6 @@ func (s *Server) connect(params json.RawMessage) (interface{}, error) {
 		return nil, err
 	}
 
-	if conn.PasswordAuth {
-		return map[string]interface{}{
-			"needs_password": true,
-			"name":           conn.Name,
-		}, nil
-	}
-
 	mountPoint, err := s.mounts.Mount(
 		conn.Name,
 		conn.Host,
@@ -247,6 +240,12 @@ func (s *Server) connect(params json.RawMessage) (interface{}, error) {
 		conn.RemotePath,
 	)
 	if err != nil {
+		if mount.IsPasswordRequired(err) {
+			return map[string]interface{}{
+				"needs_password": true,
+				"name":           conn.Name,
+			}, nil
+		}
 		return nil, err
 	}
 

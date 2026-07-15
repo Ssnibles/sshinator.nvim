@@ -9,6 +9,19 @@ import (
 	"sync"
 )
 
+type PasswordRequiredError struct {
+	Name string
+}
+
+func (e *PasswordRequiredError) Error() string {
+	return fmt.Sprintf("connection %q requires password authentication", e.Name)
+}
+
+func IsPasswordRequired(err error) bool {
+	_, ok := err.(*PasswordRequiredError)
+	return ok
+}
+
 type MountState struct {
 	mu     sync.RWMutex
 	mounts map[string]string
@@ -86,11 +99,35 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("sshfs failed: %w\nOutput: %s", err, string(output))
+		outputStr := string(output)
+		if password == "" && isPasswordError(outputStr, err) {
+			return "", &PasswordRequiredError{Name: name}
+		}
+		return "", fmt.Errorf("sshfs failed: %w\nOutput: %s", err, outputStr)
 	}
 
 	ms.mounts[name] = mountPoint
 	return mountPoint, nil
+}
+
+func isPasswordError(output string, err error) bool {
+	outputLower := strings.ToLower(output)
+	errLower := strings.ToLower(err.Error())
+	
+	passwordIndicators := []string{
+		"permission denied",
+		"password",
+		"authentication failed",
+		"publickey",
+		"keyboard-interactive",
+	}
+	
+	for _, indicator := range passwordIndicators {
+		if strings.Contains(outputLower, indicator) || strings.Contains(errLower, indicator) {
+			return true
+		}
+	}
+	return false
 }
 
 func (ms *MountState) Unmount(name string) error {
