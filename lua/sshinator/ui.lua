@@ -449,7 +449,7 @@ function M.status_window(connections, mounted)
   for _, conn in ipairs(connections) do
     local is_mounted = mounted[conn.name] ~= nil
     local icon = is_mounted and "[connected]" or "[disconnected]"
-    local line = string.format("  %s  %-20s %s@%s:%d", icon, conn.name, conn.user, conn.host, conn.port)
+    local line = string.format("  %s  %-20s %s@%s:%d", icon, conn.name, conn.user, conn.host, conn.port or 22)
     if is_mounted then
       line = line .. "  ->  " .. mounted[conn.name]
     end

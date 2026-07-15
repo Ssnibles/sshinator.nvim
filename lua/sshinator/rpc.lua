@@ -86,13 +86,21 @@ function Client:handle_stdout(data)
             self.timers[id] = nil
           end
           vim.schedule(function()
-            if decoded.error and decoded.error ~= vim.NIL then
+            if decoded.error and decoded.error ~= vim.NIL and decoded.error ~= "" then
               cb(decoded.error, nil)
             else
-              cb(nil, decoded.result)
+              local result = decoded.result
+              if result == vim.NIL then
+                result = nil
+              end
+              cb(nil, result)
             end
           end)
         end
+      else
+        vim.schedule(function()
+          vim.notify("sshinator: failed to decode response: " .. json_line, vim.log.levels.ERROR)
+        end)
       end
     end
   end

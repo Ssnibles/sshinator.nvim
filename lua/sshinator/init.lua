@@ -205,6 +205,11 @@ local function do_connect(c, name)
       return
     end
 
+    if not result then
+      ui.notify("sshinator: no response from server", vim.log.levels.ERROR)
+      return
+    end
+
     if result.needs_password then
       ui.password({ prompt = "Password for " .. name }, function(password)
         if not password then
@@ -214,14 +219,23 @@ local function do_connect(c, name)
         c:call("connect_with_password", { name = name, password = password }, function(err2, result2)
           if err2 then
             ui.notify("sshinator: " .. err2, vim.log.levels.ERROR)
-          else
-            ui.notify("sshinator: mounted '" .. name .. "' at " .. result2.mount_point, vim.log.levels.INFO)
-            vim.schedule(function()
-              vim.cmd("edit " .. vim.fn.fnameescape(result2.mount_point))
-            end)
+            return
           end
+          if not result2 then
+            ui.notify("sshinator: no response from server", vim.log.levels.ERROR)
+            return
+          end
+          ui.notify("sshinator: mounted '" .. name .. "' at " .. result2.mount_point, vim.log.levels.INFO)
+          vim.schedule(function()
+            vim.cmd("edit " .. vim.fn.fnameescape(result2.mount_point))
+          end)
         end)
       end)
+      return
+    end
+
+    if not result.mount_point then
+      ui.notify("sshinator: connection succeeded but no mount point returned", vim.log.levels.ERROR)
       return
     end
 
@@ -250,7 +264,7 @@ function M.connect()
     local items = {}
     for _, conn in ipairs(connections) do
       local auth = conn.password_auth and " [password]" or ""
-      table.insert(items, string.format("%s (%s@%s:%d)%s", conn.name, conn.user, conn.host, conn.port, auth))
+      table.insert(items, string.format("%s (%s@%s:%d)%s", conn.name, conn.user, conn.host, conn.port or 22, auth))
     end
     ui.select(items, { prompt = "Connect To" }, function(choice)
       if not choice then return end
@@ -389,7 +403,7 @@ function M.list_connections()
     local items = {}
     for _, conn in ipairs(connections) do
       local auth = conn.password_auth and " [password]" or ""
-      table.insert(items, string.format("%s (%s@%s:%d)%s", conn.name, conn.user, conn.host, conn.port, auth))
+      table.insert(items, string.format("%s (%s@%s:%d)%s", conn.name, conn.user, conn.host, conn.port or 22, auth))
     end
     ui.select(items, { prompt = "Connections" }, function(choice)
       if not choice then return end
