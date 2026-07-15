@@ -83,3 +83,7 @@ end), { desc = "List and manage connections" })
 vim.api.nvim_create_user_command("SshinatorHealth", cmd(function()
   require("sshinator.health").check()
 end), { desc = "Run sshinator health check" })
+
+vim.api.nvim_create_user_command("SshinatorSudoWrite", cmd(function()
+  sshinator.sudo_write()
+end), { desc = "Write current file with sudo on remote host" })

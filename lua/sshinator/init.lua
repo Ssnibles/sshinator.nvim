@@ -594,4 +594,182 @@ function M.list_connections()
   end)
 end
 
+function M.sudo_write()
+  local buf_path = vim.fn.expand("%:p")
+  
+  -- Check if file is in a sshinator mount
+  local mount_base = vim.fn.expand("~/.local/share/sshinator/mounts/")
+  if not buf_path:find(mount_base, 1, true) then
+    ui.notify("sshinator: current file is not in a sshinator mount", vim.log.levels.WARN)
+    return
+  end
+  
+  -- Extract connection name and remote path
+  local relative = buf_path:sub(#mount_base + 1)
+  local conn_name = relative:match("^([^/]+)")
+  local remote_file = relative:sub(#conn_name + 1)
+  
+  if not conn_name or not remote_file or remote_file == "" then
+    ui.notify("sshinator: could not determine connection or remote path", vim.log.levels.ERROR)
+    return
+  end
+  
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  
+  -- Get connection details
+  c:call("get_connection", { name = conn_name }, function(call_err, conn)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
+      return
+    end
+    if not conn then
+      ui.notify("sshinator: connection not found", vim.log.levels.ERROR)
+      return
+    end
+    
+    -- Save buffer to temporary file
+    local tmp_file = vim.fn.tempname()
+    vim.cmd("silent write " .. vim.fn.fnameescape(tmp_file))
+    
+    -- Build remote path
+    local remote_path = conn.remote_path
+    if remote_path == "." or remote_path == "" then
+      remote_path = "~"
+    end
+    remote_path = remote_path .. remote_file
+    
+    -- Use scp with sudo
+    ui.password({ prompt = "Sudo password for " .. conn.name }, function(password)
+      if not password then
+        vim.fn.delete(tmp_file)
+        ui.notify("sshinator: sudo write cancelled", vim.log.levels.WARN)
+        return
+      end
+      
+      local scp_cmd = string.format(
+        "sshpass -p %q scp -o StrictHostKeyChecking=no -P %d %s %s@%s:/tmp/sshinator_sudo_tmp && " ..
+        "sshpass -p %q ssh -o StrictHostKeyChecking=no -p %d %s@%s 'echo %q | sudo -S mv /tmp/sshinator_sudo_tmp %s'",
+        password,
+        conn.port or 22,
+        tmp_file,
+        conn.user,
+        conn.host,
+        password,
+        conn.port or 22,
+        conn.user,
+        conn.host,
+        password,
+        remote_path
+      )
+      
+      vim.fn.jobstart(scp_cmd, {
+        on_exit = function(_, code)
+          vim.fn.delete(tmp_file)
+          vim.schedule(function()
+            if code == 0 then
+              ui.notify("sshinator: file written with sudo", vim.log.levels.INFO)
+              vim.cmd("edit!")
+            else
+              ui.notify("sshinator: sudo write failed (exit code " .. code .. ")", vim.log.levels.ERROR)
+            end
+          end)
+        end,
+      })
+    end)
+  end)
+end
+
+function M.sudo_write()
+  local buf_path = vim.fn.expand("%:p")
+  
+  -- Check if file is in a sshinator mount
+  local mount_base = vim.fn.expand("~/.local/share/sshinator/mounts/")
+  if not buf_path:find(mount_base, 1, true) then
+    ui.notify("sshinator: current file is not in a sshinator mount", vim.log.levels.WARN)
+    return
+  end
+  
+  -- Extract connection name and remote path
+  local relative = buf_path:sub(#mount_base + 1)
+  local conn_name = relative:match("^([^/]+)")
+  local remote_file = relative:sub(#conn_name + 1)
+  
+  if not conn_name or not remote_file or remote_file == "" then
+    ui.notify("sshinator: could not determine connection or remote path", vim.log.levels.ERROR)
+    return
+  end
+  
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  
+  -- Get connection details
+  c:call("get_connection", { name = conn_name }, function(call_err, conn)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
+      return
+    end
+    if not conn then
+      ui.notify("sshinator: connection not found", vim.log.levels.ERROR)
+      return
+    end
+    
+    -- Save buffer to temporary file
+    local tmp_file = vim.fn.tempname()
+    vim.cmd("silent write " .. vim.fn.fnameescape(tmp_file))
+    
+    -- Build remote path
+    local remote_path = conn.remote_path
+    if remote_path == "." or remote_path == "" then
+      remote_path = "~"
+    end
+    remote_path = remote_path .. remote_file
+    
+    -- Use scp with sudo
+    ui.password({ prompt = "Sudo password for " .. conn.name }, function(password)
+      if not password then
+        vim.fn.delete(tmp_file)
+        ui.notify("sshinator: sudo write cancelled", vim.log.levels.WARN)
+        return
+      end
+      
+      local scp_cmd = string.format(
+        "sshpass -p %q scp -o StrictHostKeyChecking=no -P %d %s %s@%s:/tmp/sshinator_sudo_tmp && " ..
+        "sshpass -p %q ssh -o StrictHostKeyChecking=no -p %d %s@%s 'echo %q | sudo -S mv /tmp/sshinator_sudo_tmp %s'",
+        password,
+        conn.port or 22,
+        tmp_file,
+        conn.user,
+        conn.host,
+        password,
+        conn.port or 22,
+        conn.user,
+        conn.host,
+        password,
+        remote_path
+      )
+      
+      vim.fn.jobstart(scp_cmd, {
+        on_exit = function(_, code)
+          vim.fn.delete(tmp_file)
+          vim.schedule(function()
+            if code == 0 then
+              ui.notify("sshinator: file written with sudo", vim.log.levels.INFO)
+              vim.cmd("edit!")
+            else
+              ui.notify("sshinator: sudo write failed (exit code " .. code .. ")", vim.log.levels.ERROR)
+            end
+          end)
+        end,
+      })
+    end)
+  end)
+end
+
 return M
