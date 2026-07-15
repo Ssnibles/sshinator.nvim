@@ -108,7 +108,6 @@ function M.remove_connection()
 end
 
 local function do_connect(c, name)
-  ui.notify("sshinator: connecting to '" .. name .. "'...", vim.log.levels.INFO)
   c:call("connect", { name = name }, function(err, result)
     if err then
       ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
@@ -127,7 +126,7 @@ local function do_connect(c, name)
           else
             ui.notify("sshinator: mounted '" .. name .. "' at " .. result2.mount_point, vim.log.levels.INFO)
             vim.schedule(function()
-              vim.cmd("edit " .. result2.mount_point)
+              vim.cmd("edit " .. vim.fn.fnameescape(result2.mount_point))
             end)
           end
         end)
@@ -137,7 +136,7 @@ local function do_connect(c, name)
 
     ui.notify("sshinator: mounted '" .. name .. "' at " .. result.mount_point, vim.log.levels.INFO)
     vim.schedule(function()
-      vim.cmd("edit " .. result.mount_point)
+      vim.cmd("edit " .. vim.fn.fnameescape(result.mount_point))
     end)
   end)
 end
