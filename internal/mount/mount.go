@@ -48,11 +48,12 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
+	sanitizedName := SanitizeName(name)
 	if mountPoint, ok := ms.mounts[name]; ok {
 		return mountPoint, nil
 	}
 
-	mountPoint, err := MountDir(name)
+	mountPoint, err := MountDir(sanitizedName)
 	if err != nil {
 		return "", err
 	}
@@ -76,18 +77,9 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 
 	var cmd *exec.Cmd
 	if password != "" {
-		askpassScript, err := createAskpassScript(password)
-		if err != nil {
-			return "", fmt.Errorf("failed to create askpass script: %w", err)
-		}
-		defer os.Remove(askpassScript)
-
+		args = append(args, "-o", "password_stdin")
 		cmd = exec.Command("sshfs", args...)
-		cmd.Env = append(os.Environ(),
-			fmt.Sprintf("SSH_ASKPASS=%s", askpassScript),
-			fmt.Sprintf("SSH_ASKPASS_REQUIRE=force"),
-			"DISPLAY=:0",
-		)
+		cmd.Stdin = strings.NewReader(password + "\n")
 	} else {
 		cmd = exec.Command("sshfs", args...)
 	}
@@ -99,28 +91,6 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 
 	ms.mounts[name] = mountPoint
 	return mountPoint, nil
-}
-
-func createAskpassScript(password string) (string, error) {
-	tmpFile, err := os.CreateTemp("", "sshinator-askpass-*")
-	if err != nil {
-		return "", err
-	}
-
-	script := fmt.Sprintf("#!/bin/sh\necho '%s'\n", strings.ReplaceAll(password, "'", "'\"'\"'"))
-	if _, err := tmpFile.WriteString(script); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
-		return "", err
-	}
-	tmpFile.Close()
-
-	if err := os.Chmod(tmpFile.Name(), 0700); err != nil {
-		os.Remove(tmpFile.Name())
-		return "", err
-	}
-
-	return tmpFile.Name(), nil
 }
 
 func (ms *MountState) Unmount(name string) error {
