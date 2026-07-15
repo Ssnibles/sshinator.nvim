@@ -97,6 +97,8 @@ func (s *Server) handleRequest(req Request) (interface{}, error) {
 		return s.updateConnection(req.Params)
 	case "connect":
 		return s.connect(req.Params)
+	case "connect_with_password":
+		return s.connectWithPassword(req.Params)
 	case "disconnect":
 		return s.disconnect(req.Params)
 	case "status":
@@ -223,6 +225,13 @@ func (s *Server) connect(params json.RawMessage) (interface{}, error) {
 		return nil, err
 	}
 
+	if conn.PasswordAuth {
+		return map[string]interface{}{
+			"needs_password": true,
+			"name":           conn.Name,
+		}, nil
+	}
+
 	mountPoint, err := s.mounts.Mount(
 		conn.Name,
 		conn.Host,
@@ -230,6 +239,46 @@ func (s *Server) connect(params json.RawMessage) (interface{}, error) {
 		conn.User,
 		conn.IdentityFile,
 		conn.RemotePath,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{
+		"status":      "connected",
+		"name":        conn.Name,
+		"mount_point": mountPoint,
+	}, nil
+}
+
+type connectPasswordParam struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+func (s *Server) connectWithPassword(params json.RawMessage) (interface{}, error) {
+	var p connectPasswordParam
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := cfg.Get(p.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	mountPoint, err := s.mounts.MountWithPassword(
+		conn.Name,
+		conn.Host,
+		conn.Port,
+		conn.User,
+		conn.RemotePath,
+		p.Password,
 	)
 	if err != nil {
 		return nil, err

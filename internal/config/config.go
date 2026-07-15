@@ -8,12 +8,13 @@ import (
 )
 
 type Connection struct {
-	Name       string `json:"name"`
-	Host       string `json:"host"`
-	Port       int    `json:"port"`
-	User       string `json:"user"`
+	Name         string `json:"name"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	User         string `json:"user"`
 	IdentityFile string `json:"identity_file,omitempty"`
-	RemotePath string `json:"remote_path,omitempty"`
+	RemotePath   string `json:"remote_path,omitempty"`
+	PasswordAuth bool   `json:"password_auth,omitempty"`
 }
 
 type Config struct {

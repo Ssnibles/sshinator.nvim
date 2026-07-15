@@ -37,6 +37,14 @@ func MountDir(name string) (string, error) {
 }
 
 func (ms *MountState) Mount(name, host string, port int, user, identityFile, remotePath string) (string, error) {
+	return ms.mountInternal(name, host, port, user, identityFile, remotePath, "")
+}
+
+func (ms *MountState) MountWithPassword(name, host string, port int, user, remotePath, password string) (string, error) {
+	return ms.mountInternal(name, host, port, user, "", remotePath, password)
+}
+
+func (ms *MountState) mountInternal(name, host string, port int, user, identityFile, remotePath, password string) (string, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
@@ -66,7 +74,24 @@ func (ms *MountState) Mount(name, host string, port int, user, identityFile, rem
 		args = append(args, "-o", fmt.Sprintf("IdentityFile=%s", identityFile))
 	}
 
-	cmd := exec.Command("sshfs", args...)
+	var cmd *exec.Cmd
+	if password != "" {
+		askpassScript, err := createAskpassScript(password)
+		if err != nil {
+			return "", fmt.Errorf("failed to create askpass script: %w", err)
+		}
+		defer os.Remove(askpassScript)
+
+		cmd = exec.Command("sshfs", args...)
+		cmd.Env = append(os.Environ(),
+			fmt.Sprintf("SSH_ASKPASS=%s", askpassScript),
+			fmt.Sprintf("SSH_ASKPASS_REQUIRE=force"),
+			"DISPLAY=:0",
+		)
+	} else {
+		cmd = exec.Command("sshfs", args...)
+	}
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("sshfs failed: %w\nOutput: %s", err, string(output))
@@ -74,6 +99,28 @@ func (ms *MountState) Mount(name, host string, port int, user, identityFile, rem
 
 	ms.mounts[name] = mountPoint
 	return mountPoint, nil
+}
+
+func createAskpassScript(password string) (string, error) {
+	tmpFile, err := os.CreateTemp("", "sshinator-askpass-*")
+	if err != nil {
+		return "", err
+	}
+
+	script := fmt.Sprintf("#!/bin/sh\necho '%s'\n", strings.ReplaceAll(password, "'", "'\"'\"'"))
+	if _, err := tmpFile.WriteString(script); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return "", err
+	}
+	tmpFile.Close()
+
+	if err := os.Chmod(tmpFile.Name(), 0700); err != nil {
+		os.Remove(tmpFile.Name())
+		return "", err
+	}
+
+	return tmpFile.Name(), nil
 }
 
 func (ms *MountState) Unmount(name string) error {
