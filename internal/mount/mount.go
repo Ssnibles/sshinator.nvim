@@ -73,6 +73,19 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 		return "", err
 	}
 
+	// Check if mount point is already mounted (stale mount) and clean it up
+	if isMounted(mountPoint) {
+		cmd := exec.Command("fusermount", "-u", mountPoint)
+		cmd.Run()
+		cmd = exec.Command("fusermount3", "-u", mountPoint)
+		cmd.Run()
+	}
+
+	// Ensure mount point has correct permissions
+	if err := os.Chmod(mountPoint, 0755); err != nil {
+		return "", fmt.Errorf("failed to set mount point permissions: %w", err)
+	}
+
 	remote := fmt.Sprintf("%s@%s:%s", user, host, remotePath)
 
 	args := []string{
@@ -123,6 +136,11 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 
 	ms.mounts[name] = mountPoint
 	return mountPoint, nil
+}
+
+func isMounted(mountPoint string) bool {
+	cmd := exec.Command("mountpoint", "-q", mountPoint)
+	return cmd.Run() == nil
 }
 
 func isPasswordError(output string, err error) bool {
