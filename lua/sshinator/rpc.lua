@@ -86,14 +86,19 @@ function Client:handle_stdout(data)
             self.timers[id] = nil
           end
           vim.schedule(function()
-            if decoded.error and decoded.error ~= vim.NIL and decoded.error ~= "" then
-              cb(decoded.error, nil)
-            else
-              local result = decoded.result
-              if result == vim.NIL then
-                result = nil
+            local ok, err = pcall(function()
+              if decoded.error and decoded.error ~= vim.NIL and decoded.error ~= "" then
+                cb(decoded.error, nil)
+              else
+                local result = decoded.result
+                if result == vim.NIL then
+                  result = nil
+                end
+                cb(nil, result)
               end
-              cb(nil, result)
+            end)
+            if not ok then
+              vim.notify("sshinator: callback error: " .. tostring(err), vim.log.levels.ERROR)
             end
           end)
         end

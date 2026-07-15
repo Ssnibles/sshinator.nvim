@@ -130,7 +130,14 @@ function M.input(opts, callback)
     height = 1,
   })
   if not buf or not win then
-    callback(nil)
+    if vim.ui and vim.ui.input then
+      vim.ui.input({ prompt = prompt .. ": ", default = default }, function(value)
+        callback(value)
+      end)
+    else
+      vim.notify("sshinator: unable to create input UI", vim.log.levels.ERROR)
+      callback(nil)
+    end
     return
   end
 
@@ -182,7 +189,14 @@ function M.password(opts, callback)
     height = 1,
   })
   if not buf or not win then
-    callback(nil)
+    if vim.ui and vim.ui.input then
+      vim.ui.input({ prompt = prompt .. ": ", default = "", secret = true }, function(value)
+        callback(value)
+      end)
+    else
+      vim.notify("sshinator: unable to create password UI", vim.log.levels.ERROR)
+      callback(nil)
+    end
     return
   end
 
@@ -281,7 +295,14 @@ function M.select(items, opts, callback)
     height = height,
   })
   if not buf or not win then
-    callback(nil)
+    if vim.ui and vim.ui.select then
+      vim.ui.select(items, { prompt = prompt }, function(choice)
+        callback(choice)
+      end)
+    else
+      vim.notify("sshinator: unable to create selection UI", vim.log.levels.ERROR)
+      callback(nil)
+    end
     return
   end
 
@@ -401,6 +422,7 @@ function M.notify(msg, level)
     height = height,
   })
   if not buf or not win then
+    vim.notify("sshinator: " .. msg, level)
     return
   end
 
@@ -519,7 +541,14 @@ function M.confirm(opts, callback)
     height = 3,
   })
   if not buf or not win then
-    callback(nil)
+    if vim.ui and vim.ui.select then
+      vim.ui.select({ "Yes", "No" }, { prompt = prompt }, function(choice)
+        callback(choice == "Yes")
+      end)
+    else
+      vim.notify("sshinator: unable to create confirm UI", vim.log.levels.ERROR)
+      callback(nil)
+    end
     return
   end
 
