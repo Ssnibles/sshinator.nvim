@@ -7,6 +7,7 @@ let
     src = ./.;
 
     vendorHash = null;
+    proxyVendor = true;
 
     subPackages = [ "cmd/sshinator" ];
 
