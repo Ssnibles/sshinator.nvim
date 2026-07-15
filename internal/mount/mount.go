@@ -96,9 +96,15 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 
 	var cmd *exec.Cmd
 	if password != "" {
-		args = append(args, "-o", "password_stdin")
-		cmd = exec.CommandContext(ctx, "sshfs", args...)
-		cmd.Stdin = strings.NewReader(password + "\n")
+		if sshpassPath, err := exec.LookPath("sshpass"); err == nil {
+			sshpassArgs := []string{"-p", password, "sshfs"}
+			sshpassArgs = append(sshpassArgs, args...)
+			cmd = exec.CommandContext(ctx, sshpassPath, sshpassArgs...)
+		} else {
+			args = append(args, "-o", "password_stdin")
+			cmd = exec.CommandContext(ctx, "sshfs", args...)
+			cmd.Stdin = strings.NewReader(password + "\n")
+		}
 	} else {
 		cmd = exec.CommandContext(ctx, "sshfs", args...)
 	}
@@ -218,6 +224,11 @@ func CheckDependencies() []string {
 		}
 	}
 	return missing
+}
+
+func HasSshpass() bool {
+	_, err := exec.LookPath("sshpass")
+	return err == nil
 }
 
 func (ms *MountState) StatusString(name string) string {
