@@ -87,6 +87,7 @@ function M.add_connection(opts)
     { key = "port", prompt = "Port", default = tostring(opts.port or 22) },
     { key = "remote_path", prompt = "Remote Path", default = opts.remote_path or "." },
     { key = "identity_file", prompt = "Identity File (leave empty to skip)", default = opts.identity_file or "" },
+    { key = "password_auth", prompt = "Use password auth?", type = "confirm" },
   }
 
   ui.input_chain(fields, function(results)
@@ -99,6 +100,7 @@ function M.add_connection(opts)
       port = tonumber(results.port) or 22,
       remote_path = results.remote_path or ".",
       identity_file = results.identity_file ~= "" and results.identity_file or nil,
+      password_auth = results.password_auth == true,
     }
 
     local c, client_err = get_client()
