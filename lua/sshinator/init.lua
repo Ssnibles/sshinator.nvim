@@ -165,12 +165,106 @@ function M.add_connection(opts)
   end)
 end
 
-function M.remove_connection()
+function M.edit_connection(name)
   local c, err = get_client()
   if not c then
     ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
     return
   end
+  
+  -- Helper function to edit a specific connection
+  local function edit_conn(conn_name)
+    c:call("get_connection", { name = conn_name }, function(call_err, conn)
+      if call_err then
+        ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
+        return
+      end
+      if not conn then
+        ui.notify("sshinator: connection not found", vim.log.levels.ERROR)
+        return
+      end
+      
+      local fields = {
+        { key = "name", prompt = "Connection Name", default = conn.name or "", required = true },
+        { key = "host", prompt = "Host", default = conn.host or "", required = true },
+        { key = "user", prompt = "User", default = conn.user or vim.env.USER or "", required = true },
+        { key = "port", prompt = "Port", default = tostring(conn.port or 22) },
+        { key = "remote_path", prompt = "Remote Path", default = conn.remote_path or "." },
+        { key = "identity_file", prompt = "Identity File (leave empty to skip)", default = conn.identity_file or "" },
+        { key = "password_auth", prompt = "Use password auth?", type = "confirm" },
+      }
+      
+      ui.input_chain(fields, function(results)
+        if not results then return end
+        
+        local updated = {
+          name = results.name,
+          host = results.host,
+          user = results.user,
+          port = tonumber(results.port) or 22,
+          remote_path = results.remote_path or ".",
+          identity_file = results.identity_file ~= "" and results.identity_file or nil,
+          password_auth = results.password_auth == true,
+        }
+        
+        c:call("update_connection", { name = conn_name, updated = updated }, function(err2, result)
+          if err2 then
+            ui.notify("sshinator: " .. err2, vim.log.levels.ERROR)
+          else
+            ui.notify("sshinator: updated connection '" .. conn_name .. "'", vim.log.levels.INFO)
+          end
+        end)
+      end)
+    end)
+  end
+  
+  -- If name provided, edit directly
+  if name then
+    edit_conn(name)
+    return
+  end
+  
+  -- Otherwise, show picker
+  c:call("list_connections", {}, function(call_err, connections)
+    if call_err then
+      ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
+      return
+    end
+    if not connections or #connections == 0 then
+      ui.notify("sshinator: no connections configured", vim.log.levels.INFO)
+      return
+    end
+    local items = {}
+    for _, conn in ipairs(connections) do
+      table.insert(items, string.format("%s (%s@%s)", conn.name, conn.user, conn.host))
+    end
+    ui.select(items, { prompt = "Edit Connection" }, function(choice)
+      if not choice then return end
+      local selected_name = choice:match("^(%S+)")
+      edit_conn(selected_name)
+    end)
+  end)
+end
+
+function M.remove_connection(name)
+  local c, err = get_client()
+  if not c then
+    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  
+  -- If name provided, remove directly
+  if name then
+    c:call("remove_connection", { name = name }, function(err2, result)
+      if err2 then
+        ui.notify("sshinator: " .. err2, vim.log.levels.ERROR)
+      else
+        ui.notify("sshinator: removed '" .. name .. "'", vim.log.levels.INFO)
+      end
+    end)
+    return
+  end
+  
   c:call("list_connections", {}, function(call_err, connections)
     if call_err then
       ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
@@ -186,12 +280,12 @@ function M.remove_connection()
     end
     ui.select(items, { prompt = "Remove Connection" }, function(choice)
       if not choice then return end
-      local name = choice:match("^(%S+)")
-      c:call("remove_connection", { name = name }, function(err2, result)
+      local selected_name = choice:match("^(%S+)")
+      c:call("remove_connection", { name = selected_name }, function(err2, result)
         if err2 then
           ui.notify("sshinator: " .. err2, vim.log.levels.ERROR)
         else
-          ui.notify("sshinator: removed '" .. name .. "'", vim.log.levels.INFO)
+          ui.notify("sshinator: removed '" .. selected_name .. "'", vim.log.levels.INFO)
         end
       end)
     end)
@@ -246,12 +340,19 @@ local function do_connect(c, name)
   end)
 end
 
-function M.connect()
+function M.connect(name)
   local c, err = get_client()
   if not c then
     ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
     return
   end
+  
+  -- If name provided, connect directly
+  if name then
+    do_connect(c, name)
+    return
+  end
+  
   c:call("list_connections", {}, function(call_err, connections)
     if call_err then
       ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
@@ -268,18 +369,31 @@ function M.connect()
     end
     ui.select(items, { prompt = "Connect To" }, function(choice)
       if not choice then return end
-      local name = choice:match("^(%S+)")
-      do_connect(c, name)
+      local selected_name = choice:match("^(%S+)")
+      do_connect(c, selected_name)
     end)
   end)
 end
 
-function M.disconnect()
+function M.disconnect(name)
   local c, err = get_client()
   if not c then
     ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
     return
   end
+  
+  -- If name provided, disconnect directly
+  if name then
+    c:call("disconnect", { name = name }, function(err2, result)
+      if err2 then
+        ui.notify("sshinator: " .. err2, vim.log.levels.ERROR)
+      else
+        ui.notify("sshinator: disconnected '" .. name .. "'", vim.log.levels.INFO)
+      end
+    end)
+    return
+  end
+  
   c:call("list_mounted", {}, function(call_err, mounted)
     if call_err then
       ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
@@ -290,17 +404,17 @@ function M.disconnect()
       return
     end
     local items = {}
-    for name, path in pairs(mounted) do
-      table.insert(items, string.format("%s (%s)", name, path))
+    for mount_name, path in pairs(mounted) do
+      table.insert(items, string.format("%s (%s)", mount_name, path))
     end
     ui.select(items, { prompt = "Disconnect" }, function(choice)
       if not choice then return end
-      local name = choice:match("^(%S+)")
-      c:call("disconnect", { name = name }, function(err2, result)
+      local selected_name = choice:match("^(%S+)")
+      c:call("disconnect", { name = selected_name }, function(err2, result)
         if err2 then
           ui.notify("sshinator: " .. err2, vim.log.levels.ERROR)
         else
-          ui.notify("sshinator: disconnected '" .. name .. "'", vim.log.levels.INFO)
+          ui.notify("sshinator: disconnected '" .. selected_name .. "'", vim.log.levels.INFO)
         end
       end)
     end)
@@ -350,12 +464,27 @@ function M.status()
   end)
 end
 
-function M.reconnect()
+function M.reconnect(name)
   local c, err = get_client()
   if not c then
     ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
     return
   end
+  
+  -- If name provided, reconnect directly
+  if name then
+    c:call("disconnect", { name = name }, function(err2)
+      if err2 then
+        ui.notify("sshinator: disconnect failed: " .. err2, vim.log.levels.ERROR)
+        return
+      end
+      vim.defer_fn(function()
+        do_connect(c, name)
+      end, 100)
+    end)
+    return
+  end
+  
   c:call("list_mounted", {}, function(call_err, mounted)
     if call_err then
       ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
@@ -366,19 +495,19 @@ function M.reconnect()
       return
     end
     local items = {}
-    for name, path in pairs(mounted) do
-      table.insert(items, string.format("%s (%s)", name, path))
+    for mount_name, path in pairs(mounted) do
+      table.insert(items, string.format("%s (%s)", mount_name, path))
     end
     ui.select(items, { prompt = "Reconnect" }, function(choice)
       if not choice then return end
-      local name = choice:match("^(%S+)")
-      c:call("disconnect", { name = name }, function(err2)
+      local selected_name = choice:match("^(%S+)")
+      c:call("disconnect", { name = selected_name }, function(err2)
         if err2 then
           ui.notify("sshinator: disconnect failed: " .. err2, vim.log.levels.ERROR)
           return
         end
         vim.defer_fn(function()
-          do_connect(c, name)
+          do_connect(c, selected_name)
         end, 100)
       end)
     end)
@@ -412,6 +541,7 @@ function M.list_connections()
         "Connect",
         "Disconnect",
         "Reconnect",
+        "Edit",
         "Status",
         "Remove",
       }
@@ -437,6 +567,8 @@ function M.list_connections()
               do_connect(c, name)
             end, 100)
           end)
+        elseif action == "Edit" then
+          M.edit_connection(name)
         elseif action == "Status" then
           c:call("status", { name = name }, function(err2, result)
             if err2 then
