@@ -86,6 +86,11 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 		return "", fmt.Errorf("failed to set mount point permissions: %w", err)
 	}
 
+	// Normalize remote path - remove trailing slashes unless it's just "/"
+	if remotePath != "/" && len(remotePath) > 1 {
+		remotePath = strings.TrimRight(remotePath, "/")
+	}
+
 	remote := fmt.Sprintf("%s@%s:%s", user, host, remotePath)
 
 	args := []string{
