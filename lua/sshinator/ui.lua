@@ -142,6 +142,8 @@ function M.input(opts, callback)
   end
 
   vim.bo[buf].modifiable = true
+  vim.bo[buf].buftype = "nofile"
+  vim.b[buf].completion = false
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { default })
   vim.cmd("startinsert!")
 
@@ -199,6 +201,9 @@ function M.password(opts, callback)
     end
     return
   end
+
+  vim.bo[buf].buftype = "nofile"
+  vim.b[buf].completion = false
 
   local real_value = ""
   vim.bo[buf].modifiable = true
@@ -628,36 +633,197 @@ end
 function M.input_chain(fields, callback)
   local results = {}
   local idx = 1
+  local buf, win = nil, nil
+  local submitted = false
 
-  local function next_field()
+  local function cleanup()
+    if win and vim.api.nvim_win_is_valid(win) then
+      pcall(vim.api.nvim_win_close, win, true)
+    end
+    win = nil
+    buf = nil
+  end
+
+  local function cancel()
+    if submitted then return end
+    submitted = true
+    cleanup()
+    vim.cmd("stopinsert")
+    callback(nil)
+  end
+
+  local function render_field()
     if idx > #fields then
+      submitted = true
+      cleanup()
+      vim.cmd("stopinsert")
       callback(results)
       return
     end
+
     local field = fields[idx]
-    local input_fn
-    if field.type == "confirm" then
-      input_fn = M.confirm
-    elseif field.password then
-      input_fn = M.password
-    else
-      input_fn = M.input
-    end
-    input_fn({
-      prompt = field.prompt,
-      default = field.default or "",
-    }, function(value)
-      if value == nil and field.required then
+
+    if not buf or not vim.api.nvim_buf_is_valid(buf) then
+      local width = math.max(50, vim.fn.strdisplaywidth(field.prompt) + 20)
+      local height = field.type == "confirm" and 3 or 1
+      buf, win = create_float({
+        title = field.prompt,
+        width = width,
+        height = height,
+      })
+      if not buf or not win then
         callback(nil)
         return
       end
-      results[field.key] = value
-      idx = idx + 1
-      vim.defer_fn(next_field, 10)
-    end)
+      vim.bo[buf].buftype = "nofile"
+      vim.b[buf].completion = false
+    else
+      local width = math.max(50, vim.fn.strdisplaywidth(field.prompt) + 20)
+      local height = field.type == "confirm" and 3 or 1
+      pcall(vim.api.nvim_win_set_config, win, {
+        title = " " .. field.prompt .. " ",
+        title_pos = "center",
+        width = width,
+        height = height,
+      })
+    end
+
+    vim.api.nvim_buf_clear_namespace(buf, get_ns_id(), 0, -1)
+
+    for _, keymap in ipairs(vim.api.nvim_buf_get_keymap(buf, "i")) do
+      pcall(vim.api.nvim_buf_del_keymap, buf, "i", keymap.lhs)
+    end
+    for _, keymap in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+      pcall(vim.api.nvim_buf_del_keymap, buf, "n", keymap.lhs)
+    end
+
+    if field.type == "confirm" then
+      local selected_idx = 1
+      local options = { "Yes", "No" }
+
+      local function render_confirm()
+        local lines = {}
+        for i, opt in ipairs(options) do
+          local prefix = i == selected_idx and " > " or "   "
+          local line = prefix .. opt
+          table.insert(lines, line)
+        end
+        vim.bo[buf].modifiable = true
+        vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+        vim.bo[buf].modifiable = false
+
+        vim.api.nvim_buf_clear_namespace(buf, get_ns_id(), 0, -1)
+        for i = 1, #lines do
+          if i == selected_idx then
+            vim.api.nvim_buf_add_highlight(buf, get_ns_id(), hl_groups.selected, i - 1, 0, -1)
+          end
+        end
+      end
+
+      render_confirm()
+
+      local function submit_confirm()
+        if submitted then return end
+        results[field.key] = selected_idx == 1
+        idx = idx + 1
+        vim.schedule(render_field)
+      end
+
+      local function toggle()
+        selected_idx = selected_idx == 1 and 2 or 1
+        render_confirm()
+      end
+
+      vim.keymap.set("n", "<CR>", submit_confirm, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "q", cancel, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "j", toggle, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "k", toggle, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "<Down>", toggle, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "<Up>", toggle, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "y", function()
+        selected_idx = 1
+        submit_confirm()
+      end, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "n", function()
+        selected_idx = 2
+        submit_confirm()
+      end, { buffer = buf, noremap = true })
+    elseif field.password then
+      local real_value = ""
+      vim.bo[buf].modifiable = true
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "" })
+
+      local function update_display()
+        if not vim.api.nvim_buf_is_valid(buf) then return end
+        vim.bo[buf].modifiable = true
+        vim.api.nvim_buf_set_lines(buf, 0, -1, false, { string.rep("*", #real_value) })
+        if vim.api.nvim_win_is_valid(win) then
+          vim.api.nvim_win_set_cursor(win, { 1, #real_value })
+        end
+      end
+
+      local function submit_password()
+        if submitted then return end
+        results[field.key] = real_value ~= "" and real_value or nil
+        real_value = ""
+        idx = idx + 1
+        vim.schedule(render_field)
+      end
+
+      vim.cmd("startinsert!")
+
+      vim.api.nvim_create_autocmd({ "InsertCharPre" }, {
+        buffer = buf,
+        callback = function()
+          local char = vim.v.char
+          if char == "" or char == "\r" or char == "\n" then
+            return
+          end
+          real_value = real_value .. char
+          vim.v.char = ""
+          vim.schedule(update_display)
+        end,
+      })
+
+      vim.keymap.set("i", "<BS>", function()
+        if #real_value > 0 then
+          real_value = real_value:sub(1, -2)
+          update_display()
+        end
+      end, { buffer = buf, noremap = true })
+
+      vim.keymap.set("i", "<CR>", submit_password, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "<CR>", submit_password, { buffer = buf, noremap = true })
+      vim.keymap.set("i", "<Esc>", cancel, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "q", cancel, { buffer = buf, noremap = true })
+    else
+      vim.bo[buf].modifiable = true
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { field.default or "" })
+      vim.cmd("startinsert!")
+
+      local function submit_input()
+        if submitted then return end
+        local value = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or ""
+        if value == "" and field.required then
+          cancel()
+          return
+        end
+        results[field.key] = value ~= "" and value or nil
+        idx = idx + 1
+        vim.schedule(render_field)
+      end
+
+      vim.keymap.set("i", "<CR>", submit_input, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "<CR>", submit_input, { buffer = buf, noremap = true })
+      vim.keymap.set("i", "<Esc>", cancel, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, noremap = true })
+      vim.keymap.set("n", "q", cancel, { buffer = buf, noremap = true })
+    end
   end
 
-  next_field()
+  render_field()
 end
 
 return M
