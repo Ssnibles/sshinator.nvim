@@ -5,20 +5,25 @@ A Neovim plugin for managing and mounting remote SSH connections, similar to VS 
 ## Features
 
 - **Floating Window UI**: Beautiful, interactive floating windows for all prompts and selections using the Neovim floating window API
-- **Password Authentication**: Support for hosts that require password authentication via a secure floating password prompt
+- **Password Authentication**: Support for hosts that require password authentication via a secure floating password prompt with masked input
+- **Connection Testing**: Optionally test connections when adding them to verify they work
 - **Connection Management**: Add, remove, and edit SSH connections via interactive floating window prompts
-- **SSHFS Mounting**: Automatically mount remote filesystems using sshfs
+- **Command Arguments**: Pass connection names directly to commands (e.g., `:SshinatorConnect hostname`) with tab completion
+- **SSHFS Mounting**: Automatically mount remote filesystems using sshfs with timeout protection
 - **Interactive Picker**: Browse and manage connections with a custom floating window picker (keyboard navigable with j/k, number keys, etc.)
+- **Yes/No Confirm Picker**: Clean boolean prompts with a dedicated Yes/No interface
 - **Status Dashboard**: View all connections and their mount status in a dedicated floating window
 - **Persistent Config**: Connections stored in `~/.config/sshinator/connections.json`
 - **Auto-reconnect**: sshfs configured with reconnect and keepalive options
+- **Stale Mount Cleanup**: Automatically cleans up stale mount points before connecting
 
 ## Requirements
 
 - Neovim 0.8+
 - Go 1.21+ (for building)
 - `sshfs` (for mounting)
-- `fusermount` (for unmounting)
+- `fusermount` or `fusermount3` (for unmounting)
+- `sshpass` (optional, for password authentication)
 
 ## Installation
 
@@ -81,36 +86,43 @@ Then add the plugin directory to your Neovim runtime path.
 
 ### Commands
 
+All commands support tab completion for connection names where applicable.
+
 - `:SshinatorAdd` - Add a new SSH connection (interactive floating window prompts)
-- `:SshinatorConnect` - Connect to a remote host (floating window picker)
-- `:SshinatorDisconnect` - Disconnect from a mounted host
+- `:SshinatorConnect [name]` - Connect to a remote host (floating window picker if no name provided)
+- `:SshinatorDisconnect [name]` - Disconnect from a mounted host (picker if no name provided)
 - `:SshinatorDisconnectAll` - Disconnect all mounted hosts
-- `:SshinatorRemove` - Remove a connection
+- `:SshinatorReconnect [name]` - Reconnect to a mounted host (picker if no name provided)
+- `:SshinatorRemove [name]` - Remove a connection (picker if no name provided)
+- `:SshinatorEdit [name]` - Edit a connection (picker if no name provided)
 - `:SshinatorStatus` - Show status of all connections in a floating window dashboard
-- `:SshinatorList` - List and manage connections (with action picker)
+- `:SshinatorList` - List and manage connections (with action picker including Connect, Disconnect, Reconnect, Edit, Status, Remove)
+- `:SshinatorHealth` - Run sshinator health check
 
 ### Floating Window UI
 
 All interactions use custom floating windows:
 
-- **Input prompts**: Centered floating windows for text entry (name, host, user, etc.)
+- **Input prompts**: Centred floating windows for text entry (name, host, user, etc.)
 - **Password prompts**: Secure password entry with masked input (displays `*` characters)
+- **Yes/No confirm**: Clean boolean prompts with Yes/No options (j/k to toggle, y/n for quick select)
 - **Selection pickers**: Keyboard-navigable lists with visual highlighting
   - `j`/`k` or `↑`/`↓` to navigate
   - `<CR>` to select
   - `1`-`9` for quick selection
   - `gg`/`G` to jump to first/last
   - `q` or `<Esc>` to cancel
-- **Status dashboard**: Color-coded connection status (green for mounted, red for unmounted)
+- **Status dashboard**: Colour-coded connection status (green for mounted, red for unmounted)
 - **Notifications**: Floating window notifications that auto-dismiss after 5 seconds
 
 ### Password Authentication
 
 For hosts that require password authentication:
 
-1. When adding a connection with `:SshinatorAdd`, answer "y" to the "Use password auth?" prompt
+1. When adding a connection with `:SshinatorAdd`, select "Yes" on the "Use password auth?" prompt
 2. When connecting with `:SshinatorConnect`, you'll be prompted for your password via a secure floating window
 3. The password is never stored - it's only used for the current mount session
+4. If `sshpass` is available, it will be used for more reliable password authentication; otherwise, the plugin falls back to `password_stdin`
 
 ### Example Workflow
 
@@ -120,7 +132,7 @@ For hosts that require password authentication:
    :SshinatorAdd
    ```
 
-   Follow the floating window prompts to enter name, host, user, port, remote path, optional identity file, and whether to use password authentication.
+   Follow the floating window prompts to enter name, host, user, port, remote path, optional identity file, and whether to use password authentication. You'll be prompted to test the connection after adding it.
 
 2. Connect to a host:
 
@@ -128,7 +140,13 @@ For hosts that require password authentication:
    :SshinatorConnect
    ```
 
-   Select from your configured connections using the floating window picker. If the connection requires a password, you'll be prompted securely. The remote filesystem will be mounted and opened in Neovim.
+   Select from your configured connections using the floating window picker, or pass the connection name directly:
+
+   ```
+   :SshinatorConnect my-server
+   ```
+
+   If the connection requires a password, you'll be prompted securely. The remote filesystem will be mounted and opened in Neovim.
 
 3. View mounted connections:
 
@@ -139,8 +157,21 @@ For hosts that require password authentication:
    A floating window dashboard shows all connections with their current mount status.
 
 4. Disconnect:
+
    ```
    :SshinatorDisconnect
+   ```
+
+   Or disconnect a specific connection:
+
+   ```
+   :SshinatorDisconnect my-server
+   ```
+
+5. Edit a connection:
+
+   ```
+   :SshinatorEdit my-server
    ```
 
 ### Configuration
@@ -194,8 +225,7 @@ sshinator.nvim/
 ├── lua/sshinator/          # Lua frontend
 │   ├── init.lua            # Main module
 │   ├── rpc.lua             # RPC client
-│   ├── ui.lua              # Floating window UI components
-│   └── picker.lua          # Picker wrapper
+│   └── ui.lua              # Floating window UI components
 ├── plugin/                 # Neovim plugin entry
 │   └── sshinator.lua       # Command definitions
 ├── flake.nix               # Nix flake
@@ -208,11 +238,18 @@ sshinator.nvim/
 - **Go Backend**: JSON-RPC server over stdio, handles SSH config management and sshfs mounting
 - **Lua Frontend**: Spawns Go binary, provides floating window UI, registers Neovim commands
 - **Communication**: JSON-RPC over stdio (newline-delimited JSON)
-- **Password Auth**: Uses SSH_ASKPASS mechanism to securely pass passwords to sshfs without storing them
+- **Password Auth**: Uses `sshpass` when available for reliable password authentication, falls back to `password_stdin` otherwise
+- **Timeout Protection**: All sshfs operations have a 30-second timeout to prevent hangs
+- **Stale Mount Detection**: Automatically detects and cleans up stale mount points before connecting
 
 ## Mount Locations
 
 Remote filesystems are mounted to `~/.local/share/sshinator/mounts/<connection-name>/`
+
+## Limitations
+
+- SSHFS mounts with the permissions of your SSH user, so you cannot write to root-owned directories (e.g., `/etc/nixos`) without additional setup
+- For editing protected system files, consider symlinking configuration directories to your home directory or using alternative methods
 
 ## License
 
