@@ -698,6 +698,7 @@ function M.input_chain(fields, callback)
     end
 
     if field.type == "confirm" then
+      vim.cmd("stopinsert")
       local selected_idx = 1
       local options = { "Yes", "No" }
 
