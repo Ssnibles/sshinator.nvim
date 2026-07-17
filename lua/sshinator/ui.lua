@@ -685,6 +685,7 @@ function M.input_chain(fields, callback)
         title_pos = "center",
         width = width,
         height = height,
+        noautocmd = true,
       })
     end
 
@@ -699,6 +700,8 @@ function M.input_chain(fields, callback)
 
     if field.type == "confirm" then
       vim.cmd("stopinsert")
+      vim.api.nvim_set_option_value("number", false, { win = win })
+      vim.api.nvim_set_option_value("relativenumber", false, { win = win })
       local selected_idx = 1
       local options = { "Yes", "No" }
 
