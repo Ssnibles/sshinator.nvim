@@ -11,6 +11,7 @@ import (
 
 	"github.com/josh/sshinator.nvim/internal/config"
 	"github.com/josh/sshinator.nvim/internal/mount"
+	"github.com/josh/sshinator.nvim/internal/sshconfig"
 )
 
 type Request struct {
@@ -217,6 +218,23 @@ func (s *Server) updateConnection(params json.RawMessage) (interface{}, error) {
 	return map[string]string{"status": "updated", "name": p.Name}, config.Save(cfg)
 }
 
+func (s *Server) resolvePort(host string, currentPort int) int {
+	if currentPort != 0 && currentPort != 22 {
+		return currentPort
+	}
+
+	port, err := sshconfig.ResolvePort(host)
+	if err != nil {
+		s.logger.Printf("ssh port resolution failed for %s: %v", host, err)
+		return currentPort
+	}
+
+	if port != currentPort {
+		s.logger.Printf("resolved ssh port for %s: %d", host, port)
+	}
+	return port
+}
+
 func (s *Server) connect(params json.RawMessage) (interface{}, error) {
 	var p nameParam
 	if err := json.Unmarshal(params, &p); err != nil {
@@ -232,6 +250,8 @@ func (s *Server) connect(params json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	conn.Port = s.resolvePort(conn.Host, conn.Port)
 
 	if conn.PasswordAuth {
 		return map[string]interface{}{
@@ -285,6 +305,8 @@ func (s *Server) connectWithPassword(params json.RawMessage) (interface{}, error
 	if err != nil {
 		return nil, err
 	}
+
+	conn.Port = s.resolvePort(conn.Host, conn.Port)
 
 	mountPoint, err := s.mounts.MountWithPassword(
 		conn.Name,
@@ -372,6 +394,8 @@ func (s *Server) testConnection(params json.RawMessage) (interface{}, error) {
 	if p.Port == 0 {
 		p.Port = 22
 	}
+
+	p.Port = s.resolvePort(p.Host, p.Port)
 
 	err := mount.TestConnection(p.Host, p.Port, p.User, p.IdentityFile, p.Password)
 	if err != nil {
