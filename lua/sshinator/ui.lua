@@ -806,7 +806,11 @@ function M.input_chain(fields, callback)
       vim.keymap.set("n", "q", cancel, { buffer = buf, noremap = true })
     else
       vim.bo[buf].modifiable = true
-      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { field.default or "" })
+      local default_value = field.default
+      if type(default_value) == "function" then
+        default_value = default_value(results)
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { default_value or "" })
       vim.cmd("startinsert!")
 
       local function submit_input()

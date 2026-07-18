@@ -60,6 +60,26 @@ function M.setup(opts)
   end
 end
 
+local function detect_ssh_port(host)
+  if not host or host == "" then
+    return 22
+  end
+  if vim.fn.executable("ssh") == 0 then
+    return 22
+  end
+  local ok, output = pcall(vim.fn.system, { "ssh", "-G", host })
+  if not ok or vim.v.shell_error ~= 0 or not output or output == "" then
+    return 22
+  end
+  for line in output:gmatch("[^\r\n]+") do
+    local port = line:match("^port%s+(%d+)$")
+    if port then
+      return tonumber(port) or 22
+    end
+  end
+  return 22
+end
+
 function M.check_deps()
   local c, err = get_client()
   if not c then
@@ -84,7 +104,7 @@ function M.add_connection(opts)
     { key = "name", prompt = "Connection Name", default = opts.name or "", required = true },
     { key = "host", prompt = "Host", default = opts.host or "", required = true },
     { key = "user", prompt = "User", default = opts.user or vim.env.USER or "", required = true },
-    { key = "port", prompt = "Port", default = tostring(opts.port or 22) },
+    { key = "port", prompt = "Port", default = function(results) return tostring(opts.port or detect_ssh_port(results.host) or 22) end },
     { key = "remote_path", prompt = "Remote Path", default = opts.remote_path or "." },
     { key = "identity_file", prompt = "Identity File (leave empty to skip)", default = opts.identity_file or "" },
     { key = "password_auth", prompt = "Use password auth?", type = "confirm" },
@@ -188,7 +208,7 @@ function M.edit_connection(name)
         { key = "name", prompt = "Connection Name", default = conn.name or "", required = true },
         { key = "host", prompt = "Host", default = conn.host or "", required = true },
         { key = "user", prompt = "User", default = conn.user or vim.env.USER or "", required = true },
-        { key = "port", prompt = "Port", default = tostring(conn.port or 22) },
+        { key = "port", prompt = "Port", default = tostring(conn.port or detect_ssh_port(conn.host) or 22) },
         { key = "remote_path", prompt = "Remote Path", default = conn.remote_path or "." },
         { key = "identity_file", prompt = "Identity File (leave empty to skip)", default = conn.identity_file or "" },
         { key = "password_auth", prompt = "Use password auth?", type = "confirm" },
