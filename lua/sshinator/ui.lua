@@ -108,6 +108,8 @@ local function create_float(opts)
   vim.api.nvim_set_option_value("winhl",
     "FloatBorder:" .. hl_groups.border .. ",FloatTitle:" .. hl_groups.title,
     { win = win })
+  vim.api.nvim_set_option_value("number", false, { win = win })
+  vim.api.nvim_set_option_value("relativenumber", false, { win = win })
 
   return buf, win
 end
