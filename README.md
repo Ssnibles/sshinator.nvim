@@ -10,7 +10,8 @@ A Neovim plugin for managing and mounting remote SSH connections, similar to VS 
 - **Connection Management**: Add, remove, and edit SSH connections via interactive floating window prompts
 - **Command Arguments**: Pass connection names directly to commands (e.g., `:SshinatorConnect hostname`) with tab completion
 - **SSHFS Mounting**: Automatically mount remote filesystems using sshfs with timeout protection
-- **Interactive Picker**: Browse and manage connections with a custom floating window picker (keyboard navigable with j/k, number keys, etc.)
+- **Interactive Fuzzy Picker**: Browse and manage connections with a custom floating window picker; type `/` to filter the list
+- **SSH Config Port Detection**: Automatically uses the port from your `~/.ssh/config` when adding, editing, and connecting to hosts
 - **Yes/No Confirm Picker**: Clean boolean prompts with a dedicated Yes/No interface
 - **Status Dashboard**: View all connections and their mount status in a dedicated floating window
 - **Persistent Config**: Connections stored in `~/.config/sshinator/connections.json`
@@ -97,7 +98,7 @@ All commands support tab completion for connection names where applicable.
 - `:SshinatorEdit [name]` - Edit a connection (picker if no name provided)
 - `:SshinatorStatus` - Show status of all connections in a floating window dashboard
 - `:SshinatorList` - List and manage connections (with action picker including Connect, Disconnect, Reconnect, Edit, Status, Remove)
-- `:SshinatorHealth` - Run sshinator health check
+- `:SshinatorHealth` - Run sshinator health check (also available via `:checkhealth sshinator`)
 
 ### Floating Window UI
 
@@ -106,8 +107,9 @@ All interactions use custom floating windows:
 - **Input prompts**: Centred floating windows for text entry (name, host, user, etc.)
 - **Password prompts**: Secure password entry with masked input (displays `*` characters)
 - **Yes/No confirm**: Clean boolean prompts with Yes/No options (j/k to toggle, y/n for quick select)
-- **Selection pickers**: Keyboard-navigable lists with visual highlighting
+- **Selection pickers**: Keyboard-navigable lists with visual highlighting and fuzzy filtering
   - `j`/`k` or `↑`/`↓` to navigate
+  - `/` to start filtering the list
   - `<CR>` to select
   - `1`-`9` for quick selection
   - `gg`/`G` to jump to first/last
@@ -132,7 +134,7 @@ For hosts that require password authentication:
    :SshinatorAdd
    ```
 
-   Follow the floating window prompts to enter name, host, user, port, remote path, optional identity file, and whether to use password authentication. You'll be prompted to test the connection after adding it.
+   Follow the floating window prompts to enter name, host, user, port, remote path, optional identity file, and whether to use password authentication. The **Port** field defaults to the value from your `~/.ssh/config` (falling back to `22`). You'll be prompted to test the connection after adding it.
 
 2. Connect to a host:
 
