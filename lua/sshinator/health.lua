@@ -1,58 +1,65 @@
 local M = {}
 
+local health = vim.health or {
+  start = function(name) vim.fn["health#report_start"](name) end,
+  ok = function(msg) vim.fn["health#report_ok"](msg) end,
+  warn = function(msg) vim.fn["health#report_warn"](msg) end,
+  error = function(msg) vim.fn["health#report_error"](msg) end,
+  info = function(msg) vim.fn["health#report_info"](msg) end,
+}
+
 function M.check()
-  vim.health.start("sshinator")
+  health.start("sshinator")
 
   local init = require("sshinator")
   local binary = init.get_binary_path()
   if binary and vim.fn.executable(binary) == 1 then
-    vim.health.ok("binary found: " .. binary)
+    health.ok("sshinator binary found: " .. binary)
   else
-    vim.health.error("sshinator binary not found. Run 'make build' first.")
+    health.error("sshinator binary not found; run 'make build' first")
     return
   end
 
-  local has_sshfs = vim.fn.executable("sshfs") == 1
-  local has_fusermount = vim.fn.executable("fusermount") == 1
-
-  if has_sshfs then
-    vim.health.ok("sshfs found")
+  if vim.fn.executable("ssh") == 1 then
+    health.ok("ssh command found")
   else
-    vim.health.error("sshfs not found. Install sshfs to use sshinator.")
+    health.error("ssh command not found")
   end
 
-  if has_fusermount then
-    vim.health.ok("fusermount found")
+  if vim.fn.executable("sshfs") == 1 then
+    health.ok("sshfs found")
   else
-    local has_umount = vim.fn.executable("umount") == 1
-    if has_umount then
-      vim.health.warn("fusermount not found, will fall back to umount")
-    else
-      vim.health.error("neither fusermount nor umount found")
-    end
+    health.error("sshfs not found; install sshfs to use sshinator")
   end
 
-  local config_dir = vim.fn.stdpath("config")
-  local config_path = config_dir .. "/../sshinator/connections.json"
-  local home = vim.env.HOME or ""
-  local xdg_config = vim.env.XDG_CONFIG_HOME or (home .. "/.config")
-  config_path = xdg_config .. "/sshinator/connections.json"
+  if vim.fn.executable("fusermount") == 1 or vim.fn.executable("fusermount3") == 1 then
+    health.ok("fusermount/fusermount3 found")
+  elseif vim.fn.executable("umount") == 1 then
+    health.warn("fusermount not found; will fall back to umount")
+  else
+    health.error("neither fusermount nor umount found")
+  end
 
+  if vim.fn.executable("sshpass") == 1 then
+    health.ok("sshpass found (password auth supported)")
+  else
+    health.warn("sshpass not found; password authentication will use fallback")
+  end
+
+  local config_path = vim.fn.stdpath("config"):gsub("/[^/]+$", "") .. "/sshinator/connections.json"
   if vim.fn.filereadable(config_path) == 1 then
-    vim.health.ok("config file found: " .. config_path)
+    health.ok("config file found: " .. config_path)
   else
-    vim.health.info("no config file yet (will be created on first :SshinatorAdd)")
+    health.info("no config file yet (will be created on first :SshinatorAdd)")
   end
 
-  local ok, client = pcall(function()
-    return init._get_client()
-  end)
+  local ok, client = pcall(init._get_client)
   if ok and client and client:is_running() then
-    vim.health.ok("RPC process running")
+    health.ok("RPC process running")
   elseif ok then
-    vim.health.info("RPC process not started (will start on first command)")
+    health.info("RPC process not started (will start on first command)")
   else
-    vim.health.warn("could not check RPC status")
+    health.warn("could not check RPC status")
   end
 end
 
