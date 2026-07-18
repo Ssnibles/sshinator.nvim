@@ -108,8 +108,20 @@ local function create_float(opts)
   vim.api.nvim_set_option_value("winhl",
     "FloatBorder:" .. hl_groups.border .. ",FloatTitle:" .. hl_groups.title,
     { win = win })
-  vim.api.nvim_set_option_value("number", false, { win = win })
-  vim.api.nvim_set_option_value("relativenumber", false, { win = win })
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+
+  local float_augroup = vim.api.nvim_create_augroup("sshinator_float_" .. buf, { clear = true })
+  vim.api.nvim_create_autocmd({ "WinEnter", "BufWinEnter" }, {
+    group = float_augroup,
+    buffer = buf,
+    callback = function()
+      if vim.api.nvim_win_is_valid(win) then
+        vim.wo[win].number = false
+        vim.wo[win].relativenumber = false
+      end
+    end,
+  })
 
   return buf, win
 end
