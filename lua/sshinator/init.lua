@@ -72,7 +72,7 @@ local function detect_ssh_port(host)
     return 22
   end
   for line in output:gmatch("[^\r\n]+") do
-    local port = line:match("^port%s+(%d+)$")
+    local port = line:lower():match("^port%s+(%d+)%s*$")
     if port then
       return tonumber(port) or 22
     end

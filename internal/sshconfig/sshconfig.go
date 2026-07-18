@@ -8,7 +8,7 @@ import (
 )
 
 func parsePortLine(line string) (int, error) {
-	portStr := strings.TrimSpace(strings.TrimPrefix(line, "port "))
+	portStr := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(line), "port "))
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		return 22, fmt.Errorf("invalid port in ssh config: %w", err)
@@ -30,7 +30,7 @@ func ResolvePort(host string) (int, error) {
 	}
 
 	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "port ") {
+		if strings.HasPrefix(strings.ToLower(line), "port ") {
 			return parsePortLine(line)
 		}
 	}
