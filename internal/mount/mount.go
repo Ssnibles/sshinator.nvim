@@ -161,8 +161,11 @@ func isMounted(mountPoint string) bool {
 
 func isPasswordError(output string, err error) bool {
 	outputLower := strings.ToLower(output)
-	errLower := strings.ToLower(err.Error())
-	
+	var errLower string
+	if err != nil {
+		errLower = strings.ToLower(err.Error())
+	}
+
 	passwordIndicators := []string{
 		"permission denied",
 		"password",
