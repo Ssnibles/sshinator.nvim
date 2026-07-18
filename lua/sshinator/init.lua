@@ -129,6 +129,16 @@ function M.add_connection(opts)
       return
     end
 
+    local function handle_test_result(test_err, test_result)
+      if test_err then
+        ui.notify("sshinator: test failed: " .. test_err, vim.log.levels.ERROR)
+      elseif test_result.success then
+        ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
+      else
+        ui.notify("sshinator: connection test failed: " .. (test_result.error or "unknown error"), vim.log.levels.ERROR)
+      end
+    end
+
     local function save_and_test()
       c:call("add_connection", conn, function(call_err, result)
         if call_err then
@@ -156,26 +166,10 @@ function M.add_connection(opts)
                 return
               end
               test_params.password = password
-              c:call("test_connection", test_params, function(test_err, test_result)
-                if test_err then
-                  ui.notify("sshinator: test failed: " .. test_err, vim.log.levels.ERROR)
-                elseif test_result.success then
-                  ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
-                else
-                  ui.notify("sshinator: connection test failed: " .. (test_result.error or "unknown error"), vim.log.levels.ERROR)
-                end
-              end)
+              c:call("test_connection", test_params, handle_test_result)
             end)
           else
-            c:call("test_connection", test_params, function(test_err, test_result)
-              if test_err then
-                ui.notify("sshinator: test failed: " .. test_err, vim.log.levels.ERROR)
-              elseif test_result.success then
-                ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
-              else
-                ui.notify("sshinator: connection test failed: " .. (test_result.error or "unknown error"), vim.log.levels.ERROR)
-              end
-            end)
+            c:call("test_connection", test_params, handle_test_result)
           end
         end)
       end)
