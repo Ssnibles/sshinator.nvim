@@ -107,75 +107,78 @@ function M.add_connection(opts)
     { key = "port", prompt = "Port", default = function(results) return tostring(opts.port or detect_ssh_port(results.host) or 22) end },
     { key = "remote_path", prompt = "Remote Path", default = opts.remote_path or "." },
     { key = "identity_file", prompt = "Identity File (leave empty to skip)", default = opts.identity_file or "" },
-    { key = "password_auth", prompt = "Use password auth?", type = "confirm" },
   }
 
   ui.input_chain(fields, function(results)
     if not results then return end
 
-    local conn = {
-      name = results.name,
-      host = results.host,
-      user = results.user,
-      port = tonumber(results.port) or 22,
-      remote_path = results.remote_path or ".",
-      identity_file = results.identity_file ~= "" and results.identity_file or nil,
-      password_auth = results.password_auth == true,
-    }
+    ui.confirm({ prompt = "Use password auth?" }, function(password_auth)
+      if password_auth == nil then return end
 
-    local c, client_err = get_client()
-    if not c then
-      ui.notify("sshinator: " .. client_err, vim.log.levels.ERROR)
-      return
-    end
+      local conn = {
+        name = results.name,
+        host = results.host,
+        user = results.user,
+        port = tonumber(results.port) or 22,
+        remote_path = results.remote_path or ".",
+        identity_file = results.identity_file ~= "" and results.identity_file or nil,
+        password_auth = password_auth == true,
+      }
 
-    local function handle_test_result(test_err, test_result)
-      if test_err then
-        ui.notify("sshinator: test failed: " .. test_err, vim.log.levels.ERROR)
-      elseif test_result.success then
-        ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
-      else
-        ui.notify("sshinator: connection test failed: " .. (test_result.error or "unknown error"), vim.log.levels.ERROR)
+      local c, client_err = get_client()
+      if not c then
+        ui.notify("sshinator: " .. client_err, vim.log.levels.ERROR)
+        return
       end
-    end
 
-    local function save_and_test()
-      c:call("add_connection", conn, function(call_err, result)
-        if call_err then
-          ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
-          return
+      local function handle_test_result(test_err, test_result)
+        if test_err then
+          ui.notify("sshinator: test failed: " .. test_err, vim.log.levels.ERROR)
+        elseif test_result.success then
+          ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
+        else
+          ui.notify("sshinator: connection test failed: " .. (test_result.error or "unknown error"), vim.log.levels.ERROR)
         end
+      end
 
-        ui.confirm({ prompt = "Test connection?" }, function(test)
-          if test == nil or test == false then
-            ui.notify("sshinator: added connection '" .. conn.name .. "'", vim.log.levels.INFO)
+      local function save_and_test()
+        c:call("add_connection", conn, function(call_err, result)
+          if call_err then
+            ui.notify("sshinator: " .. call_err, vim.log.levels.ERROR)
             return
           end
 
-          local test_params = {
-            host = conn.host,
-            port = conn.port,
-            user = conn.user,
-            identity_file = conn.identity_file,
-          }
+          ui.confirm({ prompt = "Test connection?" }, function(test)
+            if test == nil or test == false then
+              ui.notify("sshinator: added connection '" .. conn.name .. "'", vim.log.levels.INFO)
+              return
+            end
 
-          if conn.password_auth then
-            ui.password({ prompt = "Password for " .. conn.name }, function(password)
-              if not password then
-                ui.notify("sshinator: added connection '" .. conn.name .. "' (not tested)", vim.log.levels.INFO)
-                return
-              end
-              test_params.password = password
+            local test_params = {
+              host = conn.host,
+              port = conn.port,
+              user = conn.user,
+              identity_file = conn.identity_file,
+            }
+
+            if conn.password_auth then
+              ui.input({ prompt = "Password for " .. conn.name, mask = true }, function(password)
+                if not password then
+                  ui.notify("sshinator: added connection '" .. conn.name .. "' (not tested)", vim.log.levels.INFO)
+                  return
+                end
+                test_params.password = password
+                c:call("test_connection", test_params, handle_test_result)
+              end)
+            else
               c:call("test_connection", test_params, handle_test_result)
-            end)
-          else
-            c:call("test_connection", test_params, handle_test_result)
-          end
+            end
+          end)
         end)
-      end)
-    end
+      end
 
-    save_and_test()
+      save_and_test()
+    end)
   end)
 end
 
@@ -205,28 +208,31 @@ function M.edit_connection(name)
         { key = "port", prompt = "Port", default = tostring(conn.port or detect_ssh_port(conn.host) or 22) },
         { key = "remote_path", prompt = "Remote Path", default = conn.remote_path or "." },
         { key = "identity_file", prompt = "Identity File (leave empty to skip)", default = conn.identity_file or "" },
-        { key = "password_auth", prompt = "Use password auth?", type = "confirm" },
       }
       
       ui.input_chain(fields, function(results)
         if not results then return end
-        
-        local updated = {
-          name = results.name,
-          host = results.host,
-          user = results.user,
-          port = tonumber(results.port) or 22,
-          remote_path = results.remote_path or ".",
-          identity_file = results.identity_file ~= "" and results.identity_file or nil,
-          password_auth = results.password_auth == true,
-        }
-        
-        c:call("update_connection", { name = conn_name, updated = updated }, function(err2, result)
-          if err2 then
-            ui.notify("sshinator: " .. err2, vim.log.levels.ERROR)
-          else
-            ui.notify("sshinator: updated connection '" .. conn_name .. "'", vim.log.levels.INFO)
-          end
+
+        ui.confirm({ prompt = "Use password auth?" }, function(password_auth)
+          if password_auth == nil then return end
+
+          local updated = {
+            name = results.name,
+            host = results.host,
+            user = results.user,
+            port = tonumber(results.port) or 22,
+            remote_path = results.remote_path or ".",
+            identity_file = results.identity_file ~= "" and results.identity_file or nil,
+            password_auth = password_auth == true,
+          }
+
+          c:call("update_connection", { name = conn_name, updated = updated }, function(err2, result)
+            if err2 then
+              ui.notify("sshinator: " .. err2, vim.log.levels.ERROR)
+            else
+              ui.notify("sshinator: updated connection '" .. conn_name .. "'", vim.log.levels.INFO)
+            end
+          end)
         end)
       end)
     end)
@@ -319,7 +325,7 @@ local function do_connect(c, name)
     end
 
     if result.needs_password then
-      ui.password({ prompt = "Password for " .. name }, function(password)
+      ui.input({ prompt = "Password for " .. name, mask = true }, function(password)
         if not password then
           ui.notify("sshinator: password required, connection cancelled", vim.log.levels.WARN)
           return
@@ -657,7 +663,7 @@ function M.sudo_write()
     remote_path = remote_path .. remote_file
     
     -- Use scp with sudo
-    ui.password({ prompt = "Sudo password for " .. conn.name }, function(password)
+    ui.input({ prompt = "Sudo password for " .. conn.name, mask = true }, function(password)
       if not password then
         vim.fn.delete(tmp_file)
         ui.notify("sshinator: sudo write cancelled", vim.log.levels.WARN)
