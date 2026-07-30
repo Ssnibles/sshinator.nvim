@@ -280,8 +280,11 @@ local function open_ssh_terminal(name, password)
     vim.cmd("noautocmd belowright split")
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_var(buf, "oil_disable", true)
+    vim.api.nvim_buf_set_name(buf, "[sshinator] " .. name)
     vim.api.nvim_win_set_buf(0, buf)
     vim.fn.termopen(cmd_parts, { cwd = "/tmp" })
+    vim.bo[buf].filetype = "sshinator-terminal"
+    vim.api.nvim_buf_set_name(buf, "[sshinator] " .. name)
     vim.cmd("startinsert")
   end, 100)
 end
@@ -325,11 +328,11 @@ local function do_connect(name, password)
   if M.config.auto_chdir then
     vim.schedule(function()
       vim.fn.chdir(mount_point)
-      vim.cmd("edit " .. vim.fn.fnameescape(mount_point))
+      vim.cmd("noautocmd edit " .. vim.fn.fnameescape(mount_point))
     end)
   else
     vim.schedule(function()
-      vim.cmd("edit " .. vim.fn.fnameescape(mount_point))
+      vim.cmd("noautocmd edit " .. vim.fn.fnameescape(mount_point))
     end)
   end
 
