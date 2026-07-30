@@ -345,6 +345,7 @@ local function open_ssh_terminal(name)
       vim.api.nvim_win_set_buf(0, buf)
       vim.b.oil_disable = true
       vim.fn.termopen(cmd_parts, vim.empty_dict())
+      vim.api.nvim_buf_set_name(0, "[sshinator] " .. name)
       vim.cmd("startinsert")
     end, 100)
   end)
