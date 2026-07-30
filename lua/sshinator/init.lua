@@ -10,6 +10,7 @@ local config = {
   notify_duration = 5000,
   request_timeout = 30000,
   external_terminal = false,
+  auto_chdir = true,
 }
 
 function M.get_binary_path()
@@ -48,6 +49,7 @@ function M.setup(opts)
   opts = opts or {}
   config.auto_check_deps = opts.auto_check_deps ~= false
   config.external_terminal = opts.external_terminal or false
+  config.auto_chdir = opts.auto_chdir ~= false
   config.notify_duration = opts.notify_duration or 5000
   config.request_timeout = opts.request_timeout or 60000
 
@@ -314,12 +316,16 @@ function M.remove_connection(name)
   end)
 end
 
-local function open_ssh_terminal(name)
+local function open_ssh_terminal(name, password)
   local c, err = get_client()
   if not c then return end
   c:call("get_connection", { name = name }, function(call_err, conn)
     if call_err or not conn then return end
-    local cmd_parts = { "ssh" }
+    local cmd_parts = {}
+    if password and password ~= "" and vim.fn.executable("sshpass") == 1 then
+      vim.list_extend(cmd_parts, { "sshpass", "-p", password })
+    end
+    vim.list_extend(cmd_parts, { "ssh" })
     if conn.port and conn.port ~= 22 then
       vim.list_extend(cmd_parts, { "-p", tostring(conn.port) })
     end
@@ -379,10 +385,13 @@ local function do_connect(c, name)
             return
           end
           ui.notify("sshinator: mounted '" .. name .. "' at " .. result2.mount_point, vim.log.levels.INFO)
-          vim.schedule(function()
-            vim.cmd("edit " .. vim.fn.fnameescape(result2.mount_point))
-          end)
-          open_ssh_terminal(name)
+          if config.auto_chdir then
+            vim.schedule(function()
+              vim.fn.chdir(result2.mount_point)
+              vim.cmd("edit " .. vim.fn.fnameescape(result2.mount_point))
+            end)
+          end
+          open_ssh_terminal(name, password)
         end)
       end)
       return
@@ -394,9 +403,16 @@ local function do_connect(c, name)
     end
 
     ui.notify("sshinator: mounted '" .. name .. "' at " .. result.mount_point, vim.log.levels.INFO)
-    vim.schedule(function()
-      vim.cmd("edit " .. vim.fn.fnameescape(result.mount_point))
-    end)
+    if config.auto_chdir then
+      vim.schedule(function()
+        vim.fn.chdir(result.mount_point)
+        vim.cmd("edit " .. vim.fn.fnameescape(result.mount_point))
+      end)
+    else
+      vim.schedule(function()
+        vim.cmd("edit " .. vim.fn.fnameescape(result.mount_point))
+      end)
+    end
     open_ssh_terminal(name)
   end)
 end

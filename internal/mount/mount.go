@@ -1,6 +1,7 @@
 package mount
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -45,17 +47,19 @@ func MountDir(name string) (string, error) {
 		dataDir = filepath.Join(home, ".local", "share")
 	}
 	dir := filepath.Join(dataDir, "sshinator", "mounts", name)
-	
-	// Check if path exists and is not a directory
-	if info, err := os.Stat(dir); err == nil {
-		if !info.IsDir() {
-			// Remove file if it exists
-			if err := os.Remove(dir); err != nil {
-				return "", fmt.Errorf("failed to remove file at mount dir: %w", err)
-			}
+
+	if _, err := os.Lstat(dir); err == nil || !os.IsNotExist(err) {
+		// Unmount any stale mount via syscall.
+		syscall.Unmount(dir, syscall.MNT_DETACH)
+		syscall.Unmount(dir, 0)
+		if isMounted(dir) {
+			return "", fmt.Errorf("stale mount at %s could not be cleaned up; run: sudo umount -l %s", dir, dir)
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return "", fmt.Errorf("failed to remove existing mount dir: %w", err)
 		}
 	}
-	
+
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create mount dir: %w", err)
 	}
@@ -82,14 +86,6 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 	mountPoint, err := MountDir(sanitizedName)
 	if err != nil {
 		return "", err
-	}
-
-	// Check if mount point is already mounted (stale mount) and clean it up
-	if isMounted(mountPoint) {
-		cmd := exec.Command("fusermount", "-u", mountPoint)
-		cmd.Run()
-		cmd = exec.Command("fusermount3", "-u", mountPoint)
-		cmd.Run()
 	}
 
 	// Ensure mount point has correct permissions
@@ -124,34 +120,53 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 		args = append(args, "-o", fmt.Sprintf("IdentityFile=%s", identityFile))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	var cmd *exec.Cmd
 	if password != "" {
-		if sshpassPath, err := exec.LookPath("sshpass"); err == nil {
-			sshpassArgs := []string{"-p", password, "sshfs"}
-			sshpassArgs = append(sshpassArgs, args...)
-			cmd = exec.CommandContext(ctx, sshpassPath, sshpassArgs...)
-		} else {
-			args = append(args, "-o", "password_stdin")
-			cmd = exec.CommandContext(ctx, "sshfs", args...)
-			cmd.Stdin = strings.NewReader(password + "\n")
+		passwordScript := filepath.Join(os.TempDir(), "sshinator-askpass-"+sanitizedName)
+		scriptContent := "#!/bin/sh\necho '" + strings.ReplaceAll(password, "'", "'\\''") + "'"
+		if err := os.WriteFile(passwordScript, []byte(scriptContent), 0700); err != nil {
+			return "", fmt.Errorf("failed to create ssh askpass script: %w", err)
 		}
+		defer os.Remove(passwordScript)
+
+		cmd = exec.Command("sshfs", args...)
+		env := os.Environ()
+		env = filterEnv(filterEnv(env, "SSH_ASKPASS"), "SSH_ASKPASS_REQUIRE")
+		env = append(env, "SSH_ASKPASS="+passwordScript)
+		cmd.Env = env
 	} else {
-		cmd = exec.CommandContext(ctx, "sshfs", args...)
+		args = append(args, "-o", "BatchMode=yes")
+		cmd = exec.Command("sshfs", args...)
+		cmd.Env = filterEnv(filterEnv(os.Environ(), "SSH_ASKPASS"), "SSH_ASKPASS_REQUIRE")
 	}
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("sshfs connection timed out after 30 seconds")
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start sshfs: %w", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		outputStr := stderrBuf.String()
+		if err != nil {
+			if password == "" && isPasswordError(outputStr, err) {
+				return "", &PasswordRequiredError{Name: name}
+			}
+			return "", fmt.Errorf("sshfs failed: %w\nOutput: %s", err, outputStr)
 		}
-		outputStr := string(output)
-		if password == "" && isPasswordError(outputStr, err) {
-			return "", &PasswordRequiredError{Name: name}
-		}
-		return "", fmt.Errorf("sshfs failed: %w\nOutput: %s", err, outputStr)
+	case <-time.After(5 * time.Second):
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	if !isMounted(mountPoint) {
+		return "", fmt.Errorf("sshfs did not mount the filesystem")
 	}
 
 	ms.mounts[name] = mountPoint
@@ -301,6 +316,8 @@ func TestConnection(host string, port int, user, identityFile, password string) 
 		cmd = exec.CommandContext(ctx, "ssh", args...)
 	}
 
+	cmd.Env = filterEnv(filterEnv(os.Environ(), "SSH_ASKPASS"), "SSH_ASKPASS_REQUIRE")
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -319,6 +336,16 @@ func (ms *MountState) StatusString(name string) string {
 		return fmt.Sprintf("mounted at %s", mp)
 	}
 	return "not mounted"
+}
+
+func filterEnv(env []string, excludeKey string) []string {
+	var filtered []string
+	for _, e := range env {
+		if !strings.HasPrefix(e, excludeKey+"=") {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }
 
 func SanitizeName(name string) string {
