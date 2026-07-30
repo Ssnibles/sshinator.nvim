@@ -206,7 +206,7 @@ local function mount_sshfs(name, conn, password)
     local askpass = vim.fn.tempname()
     local escaped = password:gsub("'", "'\\''")
     vim.fn.writefile({ "#!/bin/sh", "echo '" .. escaped .. "'" }, askpass)
-    vim.fn.setfperm(askpass, "700")
+    vim.fn.setfperm(askpass, "rwx------")
 
     local env = {}
     for k, v in pairs(vim.fn.environ()) do
@@ -277,10 +277,10 @@ local function open_ssh_terminal(name, password)
   end
 
   vim.defer_fn(function()
-    vim.cmd("noautocmd belowright split")
-    local buf = vim.api.nvim_create_buf(true, true)
-    vim.api.nvim_win_set_buf(0, buf)
+    local buf = vim.api.nvim_create_buf(false, true)
     vim.b[buf].oil_disable = true
+    vim.cmd("noautocmd belowright split")
+    vim.api.nvim_win_set_buf(0, buf)
     vim.fn.termopen(cmd_parts, vim.empty_dict())
     vim.api.nvim_buf_set_name(0, "[sshinator] " .. name)
     vim.cmd("startinsert")
