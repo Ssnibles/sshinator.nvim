@@ -10,33 +10,17 @@ local function cmd(fn)
 end
 
 local function complete_connections()
-  local c, err = sshinator._get_client()
-  if not c then
-    return {}
+  local config_path = (vim.env.XDG_CONFIG_HOME or (vim.fn.expand("~") .. "/.config"))
+    .. "/sshinator/connections.json"
+  local ok, data = pcall(vim.fn.readfile, config_path)
+  if not ok then return {} end
+  local ok, cfg = pcall(vim.fn.json_decode, table.concat(data, "\n"))
+  if not ok then return {} end
+  local names = {}
+  for _, conn in ipairs(cfg.connections or {}) do
+    table.insert(names, conn.name)
   end
-  
-  local connections = {}
-  local done = false
-  
-  c:call("list_connections", {}, function(call_err, conns)
-    if call_err or not conns then
-      done = true
-      return
-    end
-    for _, conn in ipairs(conns) do
-      table.insert(connections, conn.name)
-    end
-    done = true
-  end)
-  
-  -- Wait for response (with timeout)
-  local timeout = 100
-  while not done and timeout > 0 do
-    vim.wait(10)
-    timeout = timeout - 1
-  end
-  
-  return connections
+  return names
 end
 
 vim.api.nvim_create_user_command("SshinatorConnect", cmd(function(opts)

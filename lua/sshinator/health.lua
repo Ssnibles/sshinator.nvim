@@ -11,15 +11,6 @@ local health = vim.health or {
 function M.check()
   health.start("sshinator")
 
-  local init = require("sshinator")
-  local binary = init.get_binary_path()
-  if binary and vim.fn.executable(binary) == 1 then
-    health.ok("sshinator binary found: " .. binary)
-  else
-    health.error("sshinator binary not found; run 'make build' first")
-    return
-  end
-
   if vim.fn.executable("ssh") == 1 then
     health.ok("ssh command found")
   else
@@ -43,7 +34,7 @@ function M.check()
   if vim.fn.executable("sshpass") == 1 then
     health.ok("sshpass found (password auth supported)")
   else
-    health.warn("sshpass not found; password authentication will use fallback")
+    health.warn("sshpass not found; password authentication not available")
   end
 
   local config_path = vim.fn.stdpath("config"):gsub("/[^/]+$", "") .. "/sshinator/connections.json"
@@ -51,15 +42,6 @@ function M.check()
     health.ok("config file found: " .. config_path)
   else
     health.info("no config file yet (will be created on first :SshinatorAdd)")
-  end
-
-  local ok, client = pcall(init._get_client)
-  if ok and client and client:is_running() then
-    health.ok("RPC process running")
-  elseif ok then
-    health.info("RPC process not started (will start on first command)")
-  else
-    health.warn("could not check RPC status")
   end
 end
 

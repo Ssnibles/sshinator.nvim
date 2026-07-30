@@ -644,7 +644,7 @@ function M.confirm(opts, callback)
   })
   if not buf or not win then
     if vim.ui and vim.ui.select then
-      vim.ui.select({ "Yes", "No" }, { prompt = prompt }, function(choice)
+      vim.ui.select({ "Yes", "No" }, { prompt = title }, function(choice)
         callback(choice == "Yes")
       end)
     else
