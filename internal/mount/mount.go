@@ -104,6 +104,8 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 
 	remote := fmt.Sprintf("%s@%s:%s", user, host, remotePath)
 
+	controlPath := fmt.Sprintf("/tmp/sshinator-%%r@%%h:%d", port)
+
 	args := []string{
 		remote,
 		mountPoint,
@@ -114,6 +116,8 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 		"-o", "reconnect",
 		"-o", "follow_symlinks",
 		"-o", "ConnectTimeout=10",
+		"-o", "ControlMaster=auto",
+		"-o", fmt.Sprintf("ControlPath=%s", controlPath),
 	}
 
 	if identityFile != "" {

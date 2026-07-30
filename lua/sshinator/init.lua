@@ -9,6 +9,7 @@ local config = {
   auto_check_deps = true,
   notify_duration = 5000,
   request_timeout = 30000,
+  external_terminal = false,
 }
 
 function M.get_binary_path()
@@ -46,6 +47,7 @@ end
 function M.setup(opts)
   opts = opts or {}
   config.auto_check_deps = opts.auto_check_deps ~= false
+  config.external_terminal = opts.external_terminal or false
   config.notify_duration = opts.notify_duration or 5000
   config.request_timeout = opts.request_timeout or 60000
 
@@ -312,6 +314,42 @@ function M.remove_connection(name)
   end)
 end
 
+local function open_ssh_terminal(name)
+  local c, err = get_client()
+  if not c then return end
+  c:call("get_connection", { name = name }, function(call_err, conn)
+    if call_err or not conn then return end
+    local cmd_parts = { "ssh" }
+    if conn.port and conn.port ~= 22 then
+      vim.list_extend(cmd_parts, { "-p", tostring(conn.port) })
+    end
+    vim.list_extend(cmd_parts, { "-o", "ControlMaster=auto" })
+    vim.list_extend(cmd_parts, { "-o", string.format("ControlPath=/tmp/sshinator-%%r@%%h:%d", conn.port or 22) })
+    if conn.identity_file and conn.identity_file ~= "" then
+      vim.list_extend(cmd_parts, { "-i", conn.identity_file })
+    end
+    table.insert(cmd_parts, conn.user .. "@" .. conn.host)
+    if config.external_terminal then
+      for _, t in ipairs({ "xterm", "kitty", "alacritty", "wezterm", "gnome-terminal", "xfce4-terminal", "lxterminal", "konsole", "urxvt", "st" }) do
+        if vim.fn.executable(t) == 1 then
+          vim.fn.jobstart({ t, "-e", table.concat(cmd_parts, " ") }, { detach = true })
+          return
+        end
+      end
+      ui.notify("sshinator: no terminal emulator found", vim.log.levels.WARN)
+      return
+    end
+    vim.defer_fn(function()
+      vim.cmd("noautocmd belowright split")
+      local buf = vim.api.nvim_create_buf(true, true)
+      vim.api.nvim_win_set_buf(0, buf)
+      vim.b.oil_disable = true
+      vim.fn.termopen(cmd_parts, vim.empty_dict())
+      vim.cmd("startinsert")
+    end, 100)
+  end)
+end
+
 local function do_connect(c, name)
   c:call("connect", { name = name }, function(call_err, result)
     if call_err then
@@ -343,6 +381,7 @@ local function do_connect(c, name)
           vim.schedule(function()
             vim.cmd("edit " .. vim.fn.fnameescape(result2.mount_point))
           end)
+          open_ssh_terminal(name)
         end)
       end)
       return
@@ -357,6 +396,7 @@ local function do_connect(c, name)
     vim.schedule(function()
       vim.cmd("edit " .. vim.fn.fnameescape(result.mount_point))
     end)
+    open_ssh_terminal(name)
   end)
 end
 
