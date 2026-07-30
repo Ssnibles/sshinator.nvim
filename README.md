@@ -201,6 +201,33 @@ Connections are stored in `~/.config/sshinator/connections.json`:
 
 You can edit this file directly or use the plugin commands.
 
+### Plugin Options
+
+All options are set via `require("sshinator").setup({...})`:
+
+```lua
+require("sshinator").setup({
+  -- Core behavior
+  auto_check_deps = true,           -- warn on missing dependencies at startup
+  notify_duration = 5000,           -- ms before notifications auto-dismiss
+  request_timeout = 60000,          -- ms timeout for mount operations
+
+  -- User experience
+  external_terminal = false,        -- open SSH terminal in external emulator
+  auto_chdir = true,                -- cd to mount point + open dir on connect
+
+  -- rclone performance tuning
+  vfs_cache_mode = "writes",        -- off | minimal | writes | full
+  dir_cache_time = "5m",            -- duration to cache directory listings
+  transfers = 4,                    -- parallel file transfers
+  checkers = 8,                     -- parallel file checkers
+
+  -- Paths (nil = use XDG defaults)
+  cache_dir = nil,                  -- rclone VFS cache dir (default: $XDG_CACHE_HOME/sshinator/rclone)
+  mount_base = nil,                 -- base dir for mounts (default: $XDG_DATA_HOME/sshinator/mounts)
+})
+```
+
 ## rclone Performance
 
 The plugin mounts remote filesystems with these rclone optimizations:

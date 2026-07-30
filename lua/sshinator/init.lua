@@ -7,6 +7,12 @@ M.config = {
   request_timeout = 30000,
   external_terminal = false,
   auto_chdir = true,
+  vfs_cache_mode = "writes",
+  dir_cache_time = "5m",
+  transfers = 4,
+  checkers = 8,
+  cache_dir = nil,
+  mount_base = nil,
 }
 
 local mount_cache = {}
@@ -91,6 +97,12 @@ function M.setup(opts)
   M.config.auto_chdir = opts.auto_chdir ~= false
   M.config.notify_duration = opts.notify_duration or 5000
   M.config.request_timeout = opts.request_timeout or 60000
+  M.config.vfs_cache_mode = opts.vfs_cache_mode or "writes"
+  M.config.dir_cache_time = opts.dir_cache_time or "5m"
+  M.config.transfers = opts.transfers or 4
+  M.config.checkers = opts.checkers or 8
+  M.config.cache_dir = opts.cache_dir or nil
+  M.config.mount_base = opts.mount_base or nil
 
   ui.configure({ notify_duration = M.config.notify_duration })
 
@@ -143,7 +155,8 @@ function M._get_client()
 end
 
 local function mount_dir(name)
-  local base = vim.env.XDG_DATA_HOME or (vim.fn.expand("~") .. "/.local/share")
+  local base = M.config.mount_base
+    or (vim.env.XDG_DATA_HOME or (vim.fn.expand("~") .. "/.local/share"))
   return base .. "/sshinator/mounts/" .. name:gsub("[%s/\\:]", "_")
 end
 
@@ -237,7 +250,8 @@ local function do_mount_rclone(name, conn, password, mount_point, on_done)
     sftp_path = ":sftp:" .. remote
   end
 
-  local cache_dir = vim.env.XDG_CACHE_HOME or (vim.fn.expand("~") .. "/.cache")
+  local cache_dir = M.config.cache_dir
+    or (vim.env.XDG_CACHE_HOME or (vim.fn.expand("~") .. "/.cache"))
   cache_dir = cache_dir .. "/sshinator/rclone"
   vim.fn.mkdir(cache_dir, "p")
 
@@ -250,11 +264,11 @@ local function do_mount_rclone(name, conn, password, mount_point, on_done)
     "--sftp-host=" .. conn.host,
     "--sftp-user=" .. conn.user,
     "--sftp-port=" .. tostring(conn.port or 22),
-    "--vfs-cache-mode", "writes",
+    "--vfs-cache-mode", M.config.vfs_cache_mode,
     "--cache-dir", cache_dir,
-    "--dir-cache-time", "5m",
-    "--transfers", "4",
-    "--checkers", "8",
+    "--dir-cache-time", M.config.dir_cache_time,
+    "--transfers", tostring(M.config.transfers),
+    "--checkers", tostring(M.config.checkers),
     "--no-checksum",
     "--daemon",
     "--log-file=" .. log_file,
@@ -831,7 +845,9 @@ end
 
 function M.sudo_write()
   local buf_path = vim.fn.expand("%:p")
-  local mount_base = vim.fn.expand("~/.local/share/sshinator/mounts/")
+  local mount_base = M.config.mount_base
+    or vim.fn.expand("~/.local/share")
+  mount_base = mount_base .. "/sshinator/mounts/"
   if not buf_path:find(mount_base, 1, true) then
     ui.notify("sshinator: current file is not in a sshinator mount", vim.log.levels.WARN)
     return
