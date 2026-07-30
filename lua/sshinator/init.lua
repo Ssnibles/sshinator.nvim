@@ -9,6 +9,8 @@ M.config = {
   auto_chdir = true,
 }
 
+local mount_cache = {}
+
 local function config_path()
   local base = vim.env.XDG_CONFIG_HOME or (vim.fn.expand("~") .. "/.config")
   return base .. "/sshinator/connections.json"
@@ -36,10 +38,15 @@ local function get_connection(name)
   return nil
 end
 
-local function run_cmd(args, opts)
+local function run_cmd(args, opts, on_done)
+  if type(opts) == "function" then
+    on_done = opts
+    opts = {}
+  end
   opts = opts or {}
   local result = { stdout = "", stderr = "", code = nil }
-  local done = false
+  local timed_out = false
+  local exited = false
 
   local job_opts = {
     stdout_buffered = true,
@@ -51,25 +58,30 @@ local function run_cmd(args, opts)
       if data then result.stderr = result.stderr .. table.concat(data, "\n") end
     end,
     on_exit = function(_, code)
+      exited = true
       result.code = code
-      done = true
+      if on_done and not timed_out then on_done(result) end
     end,
   }
   if opts.env then job_opts.env = opts.env end
 
   local job_id = vim.fn.jobstart(args, job_opts)
   if not job_id or job_id <= 0 then
-    return nil, "failed to start process"
+    if on_done then on_done(nil, "failed to start process") end
+    return nil
   end
 
-  vim.wait(opts.timeout or 15000, function() return done end, 100)
-
-  if not done then
-    vim.fn.jobstop(job_id)
-    return nil, "timeout"
+  if opts.timeout then
+    vim.defer_fn(function()
+      if not exited then
+        timed_out = true
+        vim.fn.jobstop(job_id)
+        if on_done then on_done(nil, "timeout") end
+      end
+    end, opts.timeout)
   end
 
-  return result
+  return job_id
 end
 
 function M.setup(opts)
@@ -87,22 +99,30 @@ function M.setup(opts)
   end
 end
 
-local function detect_ssh_port(host)
+local function detect_ssh_port(host, on_done)
   if not host or host == "" or vim.fn.executable("ssh") == 0 then
-    return 22
+    vim.schedule(function() on_done(22) end)
+    return
   end
-  local ok, output = pcall(vim.fn.system, { "ssh", "-G", host })
-  if not ok or vim.v.shell_error ~= 0 then return 22 end
-  for line in (output or ""):gmatch("(.-)\n") do
-    local port = line:lower():match("^port%s+(%d+)%s*$")
-    if port then return tonumber(port) end
-  end
-  return 22
+  run_cmd({ "ssh", "-G", "-o", "ConnectTimeout=5", host }, function(r)
+    if not r or r.code ~= 0 then
+      on_done(22)
+      return
+    end
+    for line in (r.stdout or ""):gmatch("(.-)\n") do
+      local port = line:lower():match("^port%s+(%d+)%s*$")
+      if port then
+        on_done(tonumber(port))
+        return
+      end
+    end
+    on_done(22)
+  end)
 end
 
 function M.check_deps()
   local missing = {}
-  for _, cmd in ipairs({ "ssh", "sshfs" }) do
+  for _, cmd in ipairs({ "ssh", "rclone" }) do
     if vim.fn.executable(cmd) == 0 then table.insert(missing, cmd) end
   end
   local fusermount_ok = vim.fn.executable("fusermount3") == 1
@@ -127,43 +147,47 @@ local function mount_dir(name)
   return base .. "/sshinator/mounts/" .. name:gsub("[%s/\\:]", "_")
 end
 
-local function is_mounted(name)
+local function is_mounted(name, on_done)
+  if mount_cache[name] == false then
+    on_done(false)
+    return
+  end
+  if mount_cache[name] == true then
+    on_done(true)
+    return
+  end
   local dir = mount_dir(name)
-  if vim.fn.isdirectory(dir) == 0 then return false end
-  vim.fn.system({ "mountpoint", "-q", dir })
-  return vim.v.shell_error == 0
+  if vim.fn.isdirectory(dir) == 0 then
+    mount_cache[name] = false
+    on_done(false)
+    return
+  end
+  run_cmd({ "mountpoint", "-q", dir }, function(r)
+    local mounted = r and r.code == 0
+    mount_cache[name] = mounted
+    on_done(mounted)
+  end)
 end
 
-local function list_mounted()
+local function list_mounted(on_done)
   local cfg = M._load_config()
   local result = {}
+  if #cfg.connections == 0 then
+    on_done(result)
+    return
+  end
+  local pending = #cfg.connections
   for _, conn in ipairs(cfg.connections) do
-    local dir = mount_dir(conn.name)
-    vim.fn.system({ "mountpoint", "-q", dir })
-    if vim.v.shell_error == 0 then
-      result[conn.name] = dir
-    end
+    is_mounted(conn.name, function(mounted)
+      if mounted then
+        result[conn.name] = mount_dir(conn.name)
+      end
+      pending = pending - 1
+      if pending == 0 then
+        on_done(result)
+      end
+    end)
   end
-  return result
-end
-
-local function unmount_sshfs(name)
-  local dir = mount_dir(name)
-  if not is_mounted(name) then return true end
-  local umount_cmd
-  if vim.fn.executable("fusermount3") == 1 then
-    umount_cmd = { "fusermount3", "-u", dir }
-  elseif vim.fn.executable("fusermount") == 1 then
-    umount_cmd = { "fusermount", "-u", dir }
-  else
-    umount_cmd = { "umount", dir }
-  end
-  local r = run_cmd(umount_cmd, { timeout = 5000 })
-  if type(r) == "table" and r.code == 0 then
-    vim.fn.delete(dir, "d")
-    return true
-  end
-  return nil, "unmount failed"
 end
 
 local function is_password_error(output)
@@ -172,83 +196,161 @@ local function is_password_error(output)
     or lower:find("password")
     or lower:find("authentication failed")
     or lower:find("publickey")
+    or lower:find("ssh: handshake failed")
+    or lower:find("connection failed")
 end
 
-local function mount_sshfs(name, conn, password)
+local function unmount_rclone(name, on_done)
+  local dir = mount_dir(name)
+  is_mounted(name, function(mounted)
+    if not mounted then
+      mount_cache[name] = false
+      if on_done then on_done(true) end
+      return
+    end
+    local umount_cmd
+    if vim.fn.executable("fusermount3") == 1 then
+      umount_cmd = { "fusermount3", "-u", dir }
+    elseif vim.fn.executable("fusermount") == 1 then
+      umount_cmd = { "fusermount", "-u", dir }
+    else
+      umount_cmd = { "umount", dir }
+    end
+    run_cmd(umount_cmd, { timeout = 5000 }, function(r)
+      if r and r.code == 0 then
+        vim.fn.delete(dir, "d")
+        mount_cache[name] = false
+        if on_done then on_done(true) end
+      else
+        if on_done then on_done(nil, "unmount failed") end
+      end
+    end)
+  end)
+end
+
+local function do_mount_rclone(name, conn, password, mount_point, on_done)
+  local remote = conn.remote_path or ""
+  local sftp_path
+  if remote == "" or remote == "." then
+    sftp_path = ":sftp:"
+  else
+    sftp_path = ":sftp:" .. remote
+  end
+
+  local cache_dir = vim.env.XDG_CACHE_HOME or (vim.fn.expand("~") .. "/.cache")
+  cache_dir = cache_dir .. "/sshinator/rclone"
+  vim.fn.mkdir(cache_dir, "p")
+
+  local log_file = "/tmp/sshinator-rclone-" .. name:gsub("[%s/\\:]", "_") .. ".log"
+
+  local args = {
+    "rclone", "mount",
+    sftp_path,
+    mount_point,
+    "--sftp-host=" .. conn.host,
+    "--sftp-user=" .. conn.user,
+    "--sftp-port=" .. tostring(conn.port or 22),
+    "--vfs-cache-mode", "writes",
+    "--cache-dir", cache_dir,
+    "--dir-cache-time", "5m",
+    "--transfers", "4",
+    "--checkers", "8",
+    "--no-checksum",
+    "--daemon",
+    "--log-file=" .. log_file,
+    "--sftp-shell-type=unix",
+    "--sftp-set-modtime=false",
+    "--sftp-md5sum-command=none",
+    "--sftp-sha1sum-command=none",
+  }
+
+  if conn.identity_file and conn.identity_file ~= "" then
+    table.insert(args, "--sftp-key-file=" .. conn.identity_file)
+  end
+
+  local function verify_mount(attempt)
+    if attempt > 6 then
+      mount_cache[name] = false
+      on_done(nil, "mount verification failed, see " .. log_file)
+      return
+    end
+    run_cmd({ "mountpoint", "-q", mount_point }, function(r)
+      local mounted = r and r.code == 0
+      if mounted then
+        mount_cache[name] = true
+        on_done(mount_point)
+      else
+        vim.defer_fn(function()
+          verify_mount(attempt + 1)
+        end, 300)
+      end
+    end)
+  end
+
+  local function do_mount()
+    run_cmd(args, { timeout = M.config.request_timeout }, function(r)
+      if not r or r.code ~= 0 then
+        local err = "mount failed (exit " .. (r and r.code or "?") .. ")"
+        local full_stderr = r and r.stderr or ""
+        if r and is_password_error(full_stderr) then
+          err = "authentication failed"
+        end
+        if full_stderr ~= "" then
+          err = err .. ": " .. full_stderr:gsub("\n", " | "):sub(1, 200)
+        end
+        mount_cache[name] = false
+        on_done(nil, err)
+        return
+      end
+      verify_mount(1)
+    end)
+  end
+
+  if password then
+    vim.schedule(function()
+      ui.notify("sshinator: mounting '" .. name .. "' ...", vim.log.levels.INFO)
+    end)
+    run_cmd({ "rclone", "obscure", password }, function(r)
+      if not r or r.code ~= 0 then
+        on_done(nil, "failed to obscure password")
+        return
+      end
+      table.insert(args, "--sftp-pass=" .. r.stdout:gsub("%s+$", ""))
+      do_mount()
+    end)
+  else
+    do_mount()
+  end
+end
+
+local function mount_rclone(name, conn, password, on_done)
   local mount_point = mount_dir(name)
   vim.fn.mkdir(mount_point, "p")
 
-  if is_mounted(name) then
-    unmount_sshfs(name)
-    vim.fn.mkdir(mount_point, "p")
-  end
-
-  local remote = (conn.remote_path or "") == "" and "." or conn.remote_path
-  local args = {
-    "sshfs",
-    string.format("%s@%s:%s", conn.user, conn.host, remote),
-    mount_point,
-    "-o", "reconnect",
-    "-o", "follow_symlinks",
-    "-o", "ControlMaster=auto",
-    "-o", string.format("ControlPath=/tmp/sshinator-%%r@%%h:%d", conn.port or 22),
-  }
-  if conn.port and conn.port ~= 22 then
-    vim.list_extend(args, { "-p", tostring(conn.port) })
-  end
-  if conn.identity_file and conn.identity_file ~= "" then
-    vim.list_extend(args, { "-o", "IdentityFile=" .. conn.identity_file })
-  end
-
-  local run_opts = { timeout = 15000 }
-
-  if password then
-    local askpass = vim.fn.tempname()
-    local escaped = password:gsub("'", "'\\''")
-    vim.fn.writefile({ "#!/bin/sh", "echo '" .. escaped .. "'" }, askpass)
-    vim.fn.setfperm(askpass, "rwx------")
-
-    local env = {}
-    for k, v in pairs(vim.fn.environ()) do
-      env[k] = v
+  is_mounted(name, function(mounted)
+    if mounted then
+      unmount_rclone(name, function(ok)
+        if not ok then
+          on_done(nil, "failed to unmount existing mount")
+          return
+        end
+        vim.fn.mkdir(mount_point, "p")
+        do_mount_rclone(name, conn, password, mount_point, on_done)
+      end)
+    else
+      do_mount_rclone(name, conn, password, mount_point, on_done)
     end
-    env["SSH_ASKPASS"] = askpass
-    env["SSH_ASKPASS_REQUIRE"] = "force"
-    run_opts.env = env
-
-    local r = run_cmd(args, run_opts)
-    vim.fn.delete(askpass)
-
-    if type(r) ~= "table" then return nil, r or "mount failed" end
-    if r.code ~= 0 then
-      if is_password_error(r.stderr) then
-        return nil, "authentication failed"
-      end
-      return nil, "mount failed (exit " .. r.code .. ")"
-    end
-  else
-    vim.list_extend(args, { "-o", "BatchMode=yes" })
-    local r = run_cmd(args, run_opts)
-    if type(r) ~= "table" then return nil, r or "mount failed" end
-    if r.code ~= 0 then
-      if is_password_error(r.stderr) then
-        return nil, "authentication failed"
-      end
-      return nil, "mount failed (exit " .. r.code .. ")"
-    end
-  end
-
-  vim.fn.system({ "mountpoint", "-q", mount_point })
-  if vim.v.shell_error ~= 0 then
-    return nil, "mount verification failed"
-  end
-
-  return mount_point
+  end)
 end
 
 local function open_ssh_terminal(name, password)
   local conn = get_connection(name)
   if not conn then return end
+
+  if password and password ~= "" and vim.fn.executable("sshpass") ~= 1 then
+    ui.notify("sshinator: sshpass not installed, terminal not available for password connections", vim.log.levels.WARN)
+    return
+  end
 
   local cmd_parts = {}
   if password and password ~= "" and vim.fn.executable("sshpass") == 1 then
@@ -258,8 +360,6 @@ local function open_ssh_terminal(name, password)
   if conn.port and conn.port ~= 22 then
     vim.list_extend(cmd_parts, { "-p", tostring(conn.port) })
   end
-  vim.list_extend(cmd_parts, { "-o", "ControlMaster=auto" })
-  vim.list_extend(cmd_parts, { "-o", string.format("ControlPath=/tmp/sshinator-%%r@%%h:%d", conn.port or 22) })
   if conn.identity_file and conn.identity_file ~= "" then
     vim.list_extend(cmd_parts, { "-i", conn.identity_file })
   end
@@ -307,36 +407,37 @@ local function do_connect(name, password)
     return
   end
 
-  local mount_point, err = mount_sshfs(name, conn, password)
-  if not mount_point then
-    if err == "authentication failed" and not password then
-      ui.input({ prompt = "Password for " .. name, mask = true }, function(pw)
-        if not pw then
-          ui.notify("sshinator: authentication failed, connection cancelled", vim.log.levels.WARN)
-          return
-        end
-        do_connect(name, pw)
-      end)
+  mount_rclone(name, conn, password, function(mount_point, err)
+    if not mount_point then
+      if err == "authentication failed" and not password then
+        ui.input({ prompt = "Password for " .. name, mask = true }, function(pw)
+          if not pw then
+            ui.notify("sshinator: authentication failed, connection cancelled", vim.log.levels.WARN)
+            return
+          end
+          do_connect(name, pw)
+        end)
+        return
+      end
+      ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
       return
     end
-    ui.notify("sshinator: " .. err, vim.log.levels.ERROR)
-    return
-  end
 
-  ui.notify("sshinator: mounted '" .. name .. "' at " .. mount_point, vim.log.levels.INFO)
+    ui.notify("sshinator: mounted '" .. name .. "' at " .. mount_point, vim.log.levels.INFO)
 
-  if M.config.auto_chdir then
-    vim.schedule(function()
-      vim.fn.chdir(mount_point)
-      vim.cmd("noautocmd edit " .. vim.fn.fnameescape(mount_point))
-    end)
-  else
-    vim.schedule(function()
-      vim.cmd("noautocmd edit " .. vim.fn.fnameescape(mount_point))
-    end)
-  end
+    if M.config.auto_chdir then
+      vim.schedule(function()
+        vim.fn.chdir(mount_point)
+        vim.cmd("noautocmd edit " .. vim.fn.fnameescape(mount_point))
+      end)
+    else
+      vim.schedule(function()
+        vim.cmd("noautocmd edit " .. vim.fn.fnameescape(mount_point))
+      end)
+    end
 
-  open_ssh_terminal(name, password)
+    open_ssh_terminal(name, password)
+  end)
 end
 
 function M.add_connection(opts)
@@ -345,7 +446,7 @@ function M.add_connection(opts)
     { key = "name", prompt = "Connection Name", default = opts.name or "", required = true },
     { key = "host", prompt = "Host", default = opts.host or "", required = true },
     { key = "user", prompt = "User", default = opts.user or vim.env.USER or "", required = true },
-    { key = "port", prompt = "Port", default = function(results) return tostring(opts.port or detect_ssh_port(results.host) or 22) end },
+    { key = "port", prompt = "Port", default = function(results, cb) detect_ssh_port(results.host, cb) end, async_default = true },
     { key = "remote_path", prompt = "Remote Path", default = opts.remote_path or "." },
     { key = "identity_file", prompt = "Identity File (leave empty to skip)", default = opts.identity_file or "" },
   }
@@ -393,20 +494,22 @@ function M.add_connection(opts)
               ui.notify("sshinator: added connection '" .. conn.name .. "' (not tested)", vim.log.levels.INFO)
               return
             end
-            local r = run_cmd({ "sshpass", "-p", password, "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-p", tostring(conn.port), "-l", conn.user, conn.host, "exit" }, { timeout = 15000 })
-            if type(r) == "table" and r.code == 0 then
+            run_cmd({ "sshpass", "-p", password, "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-p", tostring(conn.port), "-l", conn.user, conn.host, "exit" }, { timeout = 15000 }, function(r)
+              if r and r.code == 0 then
+                ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
+              else
+                ui.notify("sshinator: connection test failed", vim.log.levels.ERROR)
+              end
+            end)
+          end)
+        else
+          run_cmd(test_args, { timeout = 15000 }, function(r)
+            if r and r.code == 0 then
               ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
             else
               ui.notify("sshinator: connection test failed", vim.log.levels.ERROR)
             end
           end)
-        else
-          local r = run_cmd(test_args, { timeout = 15000 })
-          if type(r) == "table" and r.code == 0 then
-            ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
-          else
-            ui.notify("sshinator: connection test failed", vim.log.levels.ERROR)
-          end
         end
       end)
     end)
@@ -425,7 +528,7 @@ function M.edit_connection(name)
       { key = "name", prompt = "Connection Name", default = conn.name or "", required = true },
       { key = "host", prompt = "Host", default = conn.host or "", required = true },
       { key = "user", prompt = "User", default = conn.user or vim.env.USER or "", required = true },
-      { key = "port", prompt = "Port", default = tostring(conn.port or detect_ssh_port(conn.host) or 22) },
+      { key = "port", prompt = "Port", default = tostring(conn.port or 22) },
       { key = "remote_path", prompt = "Remote Path", default = conn.remote_path or "." },
       { key = "identity_file", prompt = "Identity File (leave empty to skip)", default = conn.identity_file or "" },
     }
@@ -487,19 +590,22 @@ function M.remove_connection(name)
     local cfg = M._load_config()
     for i, conn in ipairs(cfg.connections) do
       if conn.name == conn_name then
-        if is_mounted(conn_name) then
-          ui.confirm({ prompt = conn_name .. " is mounted. Disconnect and remove?" }, function(ok)
-            if not ok then return end
-            unmount_sshfs(conn_name)
+        is_mounted(conn_name, function(mounted)
+          if mounted then
+            ui.confirm({ prompt = conn_name .. " is mounted. Disconnect and remove?" }, function(ok)
+              if not ok then return end
+              unmount_rclone(conn_name, function()
+                table.remove(cfg.connections, i)
+                save_config(cfg)
+                ui.notify("sshinator: removed '" .. conn_name .. "'", vim.log.levels.INFO)
+              end)
+            end)
+          else
             table.remove(cfg.connections, i)
             save_config(cfg)
             ui.notify("sshinator: removed '" .. conn_name .. "'", vim.log.levels.INFO)
-          end)
-        else
-          table.remove(cfg.connections, i)
-          save_config(cfg)
-          ui.notify("sshinator: removed '" .. conn_name .. "'", vim.log.levels.INFO)
-        end
+          end
+        end)
         return
       end
     end
@@ -552,12 +658,13 @@ end
 
 function M.disconnect(name)
   local function disconnect_conn(conn_name)
-    local ok, err = unmount_sshfs(conn_name)
-    if ok then
-      ui.notify("sshinator: disconnected '" .. conn_name .. "'", vim.log.levels.INFO)
-    else
-      ui.notify("sshinator: " .. (err or "disconnect failed"), vim.log.levels.ERROR)
-    end
+    unmount_rclone(conn_name, function(ok, err)
+      if ok then
+        ui.notify("sshinator: disconnected '" .. conn_name .. "'", vim.log.levels.INFO)
+      else
+        ui.notify("sshinator: " .. (err or "disconnect failed"), vim.log.levels.ERROR)
+      end
+    end)
   end
 
   if name then
@@ -565,40 +672,57 @@ function M.disconnect(name)
     return
   end
 
-  local mounted = list_mounted()
-  if vim.tbl_isempty(mounted) then
-    ui.notify("sshinator: no active mounts", vim.log.levels.INFO)
-    return
-  end
-  local items = {}
-  for mount_name, path in pairs(mounted) do
-    table.insert(items, string.format("%s (%s)", mount_name, path))
-  end
-  ui.select(items, { prompt = "Disconnect" }, function(choice)
-    if not choice then return end
-    local selected_name = choice:match("^(%S+)")
-    disconnect_conn(selected_name)
+  list_mounted(function(mounted)
+    if vim.tbl_isempty(mounted) then
+      ui.notify("sshinator: no active mounts", vim.log.levels.INFO)
+      return
+    end
+    local items = {}
+    for mount_name, path in pairs(mounted) do
+      table.insert(items, string.format("%s (%s)", mount_name, path))
+    end
+    ui.select(items, { prompt = "Disconnect" }, function(choice)
+      if not choice then return end
+      local selected_name = choice:match("^(%S+)")
+      disconnect_conn(selected_name)
+    end)
   end)
 end
 
 function M.disconnect_all()
-  local count = 0
-  local cfg = M._load_config()
-  for _, conn in ipairs(cfg.connections) do
-    if is_mounted(conn.name) then
-      unmount_sshfs(conn.name)
-      count = count + 1
+  list_mounted(function(mounted)
+    local count = 0
+    local pending = 0
+    for _, _ in pairs(mounted) do
+      pending = pending + 1
     end
-  end
-  ui.notify("sshinator: disconnected " .. count .. " connection(s)", vim.log.levels.INFO)
+    if pending == 0 then
+      ui.notify("sshinator: no active mounts", vim.log.levels.INFO)
+      return
+    end
+    for conn_name, _ in pairs(mounted) do
+      unmount_rclone(conn_name, function(ok)
+        if ok then count = count + 1 end
+        pending = pending - 1
+        if pending == 0 then
+          ui.notify("sshinator: disconnected " .. count .. " connection(s)", vim.log.levels.INFO)
+        end
+      end)
+    end
+  end)
 end
 
 function M.reconnect(name)
   local function reconnect_conn(conn_name)
-    unmount_sshfs(conn_name)
-    vim.defer_fn(function()
-      do_connect(conn_name)
-    end, 100)
+    unmount_rclone(conn_name, function(ok)
+      if not ok then
+        ui.notify("sshinator: unmount failed during reconnect", vim.log.levels.ERROR)
+        return
+      end
+      vim.defer_fn(function()
+        do_connect(conn_name)
+      end, 100)
+    end)
   end
 
   if name then
@@ -606,19 +730,20 @@ function M.reconnect(name)
     return
   end
 
-  local mounted = list_mounted()
-  if vim.tbl_isempty(mounted) then
-    ui.notify("sshinator: no active mounts to reconnect", vim.log.levels.INFO)
-    return
-  end
-  local items = {}
-  for mount_name, path in pairs(mounted) do
-    table.insert(items, string.format("%s (%s)", mount_name, path))
-  end
-  ui.select(items, { prompt = "Reconnect" }, function(choice)
-    if not choice then return end
-    local selected_name = choice:match("^(%S+)")
-    reconnect_conn(selected_name)
+  list_mounted(function(mounted)
+    if vim.tbl_isempty(mounted) then
+      ui.notify("sshinator: no active mounts to reconnect", vim.log.levels.INFO)
+      return
+    end
+    local items = {}
+    for mount_name, path in pairs(mounted) do
+      table.insert(items, string.format("%s (%s)", mount_name, path))
+    end
+    ui.select(items, { prompt = "Reconnect" }, function(choice)
+      if not choice then return end
+      local selected_name = choice:match("^(%S+)")
+      reconnect_conn(selected_name)
+    end)
   end)
 end
 
@@ -628,9 +753,10 @@ function M.status()
     ui.notify("sshinator: no connections configured", vim.log.levels.INFO)
     return
   end
-  local mounted = list_mounted()
-  vim.schedule(function()
-    ui.status_window(cfg.connections, mounted)
+  list_mounted(function(mounted)
+    vim.schedule(function()
+      ui.status_window(cfg.connections, mounted)
+    end)
   end)
 end
 
@@ -656,32 +782,45 @@ function M.list_connections()
       if action == "Connect" then
         do_connect(name)
       elseif action == "Disconnect" then
-        local ok, err = unmount_sshfs(name)
-        if ok then
-          ui.notify("sshinator: disconnected '" .. name .. "'", vim.log.levels.INFO)
-        else
-          ui.notify("sshinator: " .. (err or "disconnect failed"), vim.log.levels.ERROR)
-        end
+        unmount_rclone(name, function(ok, err)
+          if ok then
+            ui.notify("sshinator: disconnected '" .. name .. "'", vim.log.levels.INFO)
+          else
+            ui.notify("sshinator: " .. (err or "disconnect failed"), vim.log.levels.ERROR)
+          end
+        end)
       elseif action == "Reconnect" then
-        unmount_sshfs(name)
-        vim.defer_fn(function()
-          do_connect(name)
-        end, 100)
+        unmount_rclone(name, function(ok)
+          if not ok then return end
+          vim.defer_fn(function()
+            do_connect(name)
+          end, 100)
+        end)
       elseif action == "Edit" then
         M.edit_connection(name)
       elseif action == "Status" then
-        local dir = mount_dir(name)
-        local mounted = is_mounted(name)
-        local msg = mounted and string.format("MOUNTED at %s", dir) or "not mounted"
-        ui.notify("sshinator: " .. name .. " - " .. msg, vim.log.levels.INFO)
+        is_mounted(name, function(mounted)
+          local dir = mount_dir(name)
+          local msg = mounted and string.format("MOUNTED at %s", dir) or "not mounted"
+          ui.notify("sshinator: " .. name .. " - " .. msg, vim.log.levels.INFO)
+        end)
       elseif action == "Remove" then
-        local cfg = M._load_config()
-        for i, conn in ipairs(cfg.connections) do
+        local cfg2 = M._load_config()
+        for i, conn in ipairs(cfg2.connections) do
           if conn.name == name then
-            if is_mounted(name) then unmount_sshfs(name) end
-            table.remove(cfg.connections, i)
-            save_config(cfg)
-            ui.notify("sshinator: removed '" .. name .. "'", vim.log.levels.INFO)
+            is_mounted(name, function(mounted)
+              if mounted then
+                unmount_rclone(name, function()
+                  table.remove(cfg2.connections, i)
+                  save_config(cfg2)
+                  ui.notify("sshinator: removed '" .. name .. "'", vim.log.levels.INFO)
+                end)
+              else
+                table.remove(cfg2.connections, i)
+                save_config(cfg2)
+                ui.notify("sshinator: removed '" .. name .. "'", vim.log.levels.INFO)
+              end
+            end)
             return
           end
         end

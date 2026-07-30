@@ -17,10 +17,10 @@ function M.check()
     health.error("ssh command not found")
   end
 
-  if vim.fn.executable("sshfs") == 1 then
-    health.ok("sshfs found")
+  if vim.fn.executable("rclone") == 1 then
+    health.ok("rclone found (SFTP mount backend)")
   else
-    health.error("sshfs not found; install sshfs to use sshinator")
+    health.error("rclone not found; install rclone to use sshinator")
   end
 
   if vim.fn.executable("fusermount") == 1 or vim.fn.executable("fusermount3") == 1 then

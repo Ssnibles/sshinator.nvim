@@ -1,6 +1,6 @@
 # sshinator.nvim
 
-A Neovim plugin for managing and mounting remote SSH connections, similar to VS Code's Remote SSH extension. Built with a Go backend for performance and reliability, and Lua for the Neovim UI.
+A Neovim plugin for managing and mounting remote SSH connections, similar to VS Code's Remote SSH extension. Uses rclone for fast, async remote filesystem mounting and Lua for the Neovim UI.
 
 ## Features
 
@@ -9,20 +9,19 @@ A Neovim plugin for managing and mounting remote SSH connections, similar to VS 
 - **Connection Testing**: Optionally test connections when adding them to verify they work
 - **Connection Management**: Add, remove, and edit SSH connections via interactive floating window prompts
 - **Command Arguments**: Pass connection names directly to commands (e.g., `:SshinatorConnect hostname`) with tab completion
-- **SSHFS Mounting**: Automatically mount remote filesystems using sshfs with timeout protection
+- **rclone SFTP Mounting**: Fast, async remote filesystem mounting using rclone's SFTP backend with VFS write caching, parallel transfers, and directory caching
 - **Interactive Fuzzy Picker**: Browse and manage connections with a custom floating window picker; type `/` to filter the list
-- **SSH Config Port Detection**: Automatically uses the port from your `~/.ssh/config` when adding, editing, and connecting to hosts
+- **SSH Config Port Detection**: Automatically detects the port from your `~/.ssh/config` when adding connections (async, non-blocking)
 - **Yes/No Confirm Picker**: Clean boolean prompts with a dedicated Yes/No interface
 - **Status Dashboard**: View all connections and their mount status in a dedicated floating window
 - **Persistent Config**: Connections stored in `~/.config/sshinator/connections.json`
-- **Auto-reconnect**: sshfs configured with reconnect and keepalive options
-- **Stale Mount Cleanup**: Automatically cleans up stale mount points before connecting
+- **Async Operations**: All mount/unmount/status operations are fully async using Neovim's job control
 
 ## Requirements
 
 - Neovim 0.8+
-- Go 1.21+ (for building)
-- `sshfs` (for mounting)
+- `rclone` (for SFTP mounting - faster and more reliable than sshfs)
+- `ssh` (for terminal sessions and port detection)
 - `fusermount` or `fusermount3` (for unmounting)
 - `sshpass` (optional, for password authentication)
 
@@ -54,7 +53,6 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 {
   "Ssnibles/sshinator.nvim",
-  build = "make build",
   config = function()
     require("sshinator").setup()
   end,
@@ -66,7 +64,6 @@ With [packer.nvim](https://github.com/wbthomason/packer.nvim):
 ```lua
 use {
   "Ssnibles/sshinator.nvim",
-  run = "make build",
   config = function()
     require("sshinator").setup()
   end,
@@ -77,8 +74,6 @@ use {
 
 ```bash
 git clone https://github.com/Ssnibles/sshinator.nvim
-cd sshinator.nvim
-make build
 ```
 
 Then add the plugin directory to your Neovim runtime path.
@@ -124,7 +119,7 @@ For hosts that require password authentication:
 1. When adding a connection with `:SshinatorAdd`, select "Yes" on the "Use password auth?" prompt
 2. When connecting with `:SshinatorConnect`, you'll be prompted for your password via a secure floating window
 3. The password is never stored - it's only used for the current mount session
-4. If `sshpass` is available, it will be used for more reliable password authentication; otherwise, the plugin falls back to `password_stdin`
+ 4. rclone obscures passwords via `rclone obscure` before passing them to the SFTP backend
 
 ### Example Workflow
 
@@ -134,7 +129,7 @@ For hosts that require password authentication:
    :SshinatorAdd
    ```
 
-   Follow the floating window prompts to enter name, host, user, port, remote path, optional identity file, and whether to use password authentication. The **Port** field defaults to the value from your `~/.ssh/config` (falling back to `22`). You'll be prompted to test the connection after adding it.
+   Follow the floating window prompts to enter name, host, user, port, remote path, optional identity file, and whether to use password authentication. The **Port** field defaults to the detected value from your `~/.ssh/config` (falling back to `22`), detected asynchronously. You'll be prompted to test the connection after adding it.
 
 2. Connect to a host:
 
@@ -148,7 +143,7 @@ For hosts that require password authentication:
    :SshinatorConnect my-server
    ```
 
-   If the connection requires a password, you'll be prompted securely. The remote filesystem will be mounted and opened in Neovim.
+   If the connection requires a password, you'll be prompted securely. The remote filesystem will be mounted via rclone and opened in Neovim.
 
 3. View mounted connections:
 
@@ -206,43 +201,49 @@ Connections are stored in `~/.config/sshinator/connections.json`:
 
 You can edit this file directly or use the plugin commands.
 
-## Development
+## rclone Performance
 
-### Building from Source
+The plugin mounts remote filesystems with these rclone optimizations:
+
+- `--vfs-cache-mode writes` - Write-back caching for fast edits
+- `--dir-cache-time 5m` - Directory listings cached for 5 minutes
+- `--transfers 4` / `--checkers 8` - Parallel file transfers and checks
+- `--no-checksum` - Skip checksum verification for speed
+- `--daemon` - Background mount process
+- `--sftp-shell-type=unix` / `--sftp-set-modtime=false` - Skip shell auto-detection for faster startup
+- `--sftp-md5sum-command=none` / `--sftp-sha1sum-command=none` - Skip hash command auto-detection
+
+Cache files are stored at `$XDG_CACHE_HOME/sshinator/rclone/` (defaults to `~/.cache/sshinator/rclone/`).
+
+## Troubleshooting
+
+If a mount fails, check the rclone daemon log:
 
 ```bash
-nix develop  # or: nix-shell
-make build
+cat /tmp/sshinator-rclone-<connection-name>.log
 ```
 
-### Project Structure
+The error notification will also include stderr output from the mount command.
+
+## Project Structure
 
 ```
 sshinator.nvim/
-├── cmd/sshinator/          # Go main entry point
-├── internal/
-│   ├── config/             # Connection config management
-│   ├── mount/              # SSHFS mounting logic
-│   └── rpc/                # JSON-RPC server
-├── lua/sshinator/          # Lua frontend
-│   ├── init.lua            # Main module
-│   ├── rpc.lua             # RPC client
-│   └── ui.lua              # Floating window UI components
-├── plugin/                 # Neovim plugin entry
-│   └── sshinator.lua       # Command definitions
-├── flake.nix               # Nix flake
-├── default.nix             # Nix package
-└── shell.nix               # Dev shell
+├── lua/sshinator/
+│   ├── init.lua              # Core rclone mounting and connection logic
+│   ├── ui.lua                # Floating window UI components
+│   └── health.lua            # Health check diagnostics
+├── plugin/
+│   └── sshinator.lua         # Neovim command definitions
+├── default.nix               # Nix package
+└── README.md
 ```
 
-### Architecture
+## Architecture
 
-- **Go Backend**: JSON-RPC server over stdio, handles SSH config management and sshfs mounting
-- **Lua Frontend**: Spawns Go binary, provides floating window UI, registers Neovim commands
-- **Communication**: JSON-RPC over stdio (newline-delimited JSON)
-- **Password Auth**: Uses `sshpass` when available for reliable password authentication, falls back to `password_stdin` otherwise
-- **Timeout Protection**: All sshfs operations have a 30-second timeout to prevent hangs
-- **Stale Mount Detection**: Automatically detects and cleans up stale mount points before connecting
+- **rclone Backend**: rclone SFTP mount provides fast, reliable remote filesystem access with built-in VFS caching and parallel transfers
+- **Async Operations**: All mount, unmount, and status checks use `vim.fn.jobstart` for non-blocking operation
+- **Lua Frontend**: Pure Lua UI with floating windows, no external binary dependencies beyond rclone/ssh
 
 ## Mount Locations
 
@@ -250,7 +251,7 @@ Remote filesystems are mounted to `~/.local/share/sshinator/mounts/<connection-n
 
 ## Limitations
 
-- SSHFS mounts with the permissions of your SSH user, so you cannot write to root-owned directories (e.g., `/etc/nixos`) without additional setup
+- rclone mounts with the permissions of your SSH user, so you cannot write to root-owned directories without additional setup
 - For editing protected system files, consider symlinking configuration directories to your home directory or using alternative methods
 
 ## License

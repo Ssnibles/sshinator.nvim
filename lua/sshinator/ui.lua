@@ -673,20 +673,7 @@ function M.input_chain(fields, callback)
   local idx = 1
   local submitted = false
 
-  local function process_field()
-    if submitted then return end
-    if idx > #fields then
-      submitted = true
-      callback(results)
-      return
-    end
-
-    local field = fields[idx]
-    local default_val = field.default
-    if type(default_val) == "function" then
-      default_val = default_val(results)
-    end
-
+  local function show_input(field, default_val)
     if field.mask then
       M.input({
         title = field.prompt,
@@ -723,6 +710,31 @@ function M.input_chain(fields, callback)
         vim.schedule(process_field)
       end)
     end
+  end
+
+  local function process_field()
+    if submitted then return end
+    if idx > #fields then
+      submitted = true
+      callback(results)
+      return
+    end
+
+    local field = fields[idx]
+    local default_val = field.default
+    if type(default_val) == "function" then
+      if field.async_default then
+        default_val(results, function(computed_default)
+          if submitted then return end
+          show_input(field, computed_default)
+        end)
+        return
+      else
+        default_val = default_val(results)
+      end
+    end
+
+    show_input(field, default_val)
   end
 
   vim.schedule(process_field)
