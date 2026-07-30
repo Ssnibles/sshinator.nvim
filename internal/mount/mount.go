@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -49,9 +48,9 @@ func MountDir(name string) (string, error) {
 	dir := filepath.Join(dataDir, "sshinator", "mounts", name)
 
 	if _, err := os.Lstat(dir); err == nil || !os.IsNotExist(err) {
-		// Unmount any stale mount via syscall.
-		syscall.Unmount(dir, syscall.MNT_DETACH)
-		syscall.Unmount(dir, 0)
+		exec.Command("fusermount", "-u", dir).Run()
+		exec.Command("fusermount3", "-u", dir).Run()
+		exec.Command("umount", dir).Run()
 		if isMounted(dir) {
 			return "", fmt.Errorf("stale mount at %s could not be cleaned up; run: sudo umount -l %s", dir, dir)
 		}
@@ -80,7 +79,10 @@ func (ms *MountState) mountInternal(name, host string, port int, user, identityF
 
 	sanitizedName := SanitizeName(name)
 	if mountPoint, ok := ms.mounts[name]; ok {
-		return mountPoint, nil
+		if isMounted(mountPoint) {
+			return mountPoint, nil
+		}
+		delete(ms.mounts, name)
 	}
 
 	mountPoint, err := MountDir(sanitizedName)
