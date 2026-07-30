@@ -498,69 +498,7 @@ end
 
 function M.notify(msg, level)
   level = level or vim.log.levels.INFO
-  local lines = vim.split(msg, "\n")
-
-  local max_width = 40
-  for _, line in ipairs(lines) do
-    local w = vim.fn.strdisplaywidth(line)
-    if w > max_width then
-      max_width = w
-    end
-  end
-  local columns, lines_count = get_ui_size()
-  local width = math.min(math.max(max_width + 4, 30), math.floor(columns * 0.8))
-  local height = math.min(#lines, math.floor(lines_count * 0.6))
-
-  local title = "Sshinator"
-  if level == vim.log.levels.ERROR then
-    title = "Sshinator Error"
-  elseif level == vim.log.levels.WARN then
-    title = "Sshinator Warning"
-  end
-
-  local buf, win = create_float({
-    title = title,
-    width = width,
-    height = height,
-  })
-  if not buf or not win then
-    vim.notify("sshinator: " .. msg, level)
-    return
-  end
-
-  vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modifiable = false
-
-  local hl = hl_groups.header
-  if level == vim.log.levels.ERROR then
-    hl = hl_groups.status_unmounted
-  elseif level == vim.log.levels.WARN then
-    hl = hl_groups.keybind
-  end
-
-  for i = 0, #lines - 1 do
-    vim.api.nvim_buf_add_highlight(buf, get_ns_id(), hl, i, 0, -1)
-  end
-
-  local dismissed = false
-  local function dismiss()
-    if dismissed then return end
-    dismissed = true
-    close_float(win, buf)
-  end
-
-  vim.keymap.set("n", "<CR>", dismiss, { buffer = buf, noremap = true })
-  vim.keymap.set("n", "<Esc>", dismiss, { buffer = buf, noremap = true })
-  vim.keymap.set("n", "q", dismiss, { buffer = buf, noremap = true })
-
-  vim.api.nvim_create_autocmd("BufLeave", {
-    buffer = buf,
-    once = true,
-    callback = dismiss,
-  })
-
-  vim.defer_fn(dismiss, config.notify_duration)
+  vim.notify("[sshinator] " .. msg, level)
 end
 
 function M.status_window(connections, mounted)
