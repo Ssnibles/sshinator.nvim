@@ -277,9 +277,9 @@ local function open_ssh_terminal(name, password)
   end
 
   vim.defer_fn(function()
-    local buf = vim.api.nvim_create_buf(false, true)
-    vim.b[buf].oil_disable = true
     vim.cmd("noautocmd belowright split")
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_var(buf, "oil_disable", true)
     vim.api.nvim_win_set_buf(0, buf)
     vim.fn.termopen(cmd_parts, { cwd = "/tmp" })
     vim.cmd("startinsert")
