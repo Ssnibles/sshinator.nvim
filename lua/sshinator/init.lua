@@ -281,8 +281,7 @@ local function open_ssh_terminal(name, password)
     vim.b[buf].oil_disable = true
     vim.cmd("noautocmd belowright split")
     vim.api.nvim_win_set_buf(0, buf)
-    vim.fn.termopen(cmd_parts, vim.empty_dict())
-    vim.api.nvim_buf_set_name(0, "[sshinator] " .. name)
+    vim.fn.termopen(cmd_parts, { cwd = "/tmp" })
     vim.cmd("startinsert")
   end, 100)
 end
