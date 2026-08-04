@@ -416,6 +416,29 @@ local function mount_rclone(name, conn, password, on_done)
   end)
 end
 
+local function terminal_args(term, cmd_parts)
+  -- Build argv for the terminal emulator. Different emulators use
+  -- different conventions for running a command on launch.
+  if term == "kitty" then
+    return vim.list_extend({ "kitty" }, cmd_parts)
+  elseif term == "wezterm" then
+    return vim.list_extend({ "wezterm", "start", "--" }, cmd_parts)
+  elseif term == "gnome-terminal" then
+    return vim.list_extend({ "gnome-terminal", "--" }, cmd_parts)
+  elseif term == "xfce4-terminal" then
+    -- xfce4-terminal -e expects a single shell command string.
+    local escaped = {}
+    for _, part in ipairs(cmd_parts) do
+      table.insert(escaped, vim.fn.shellescape(part))
+    end
+    return { "xfce4-terminal", "-e", table.concat(escaped, " ") }
+  else
+    -- Default: xterm, alacritty, konsole, urxvt, st, lxterminal, and any
+    -- custom terminal are assumed to support -e <program> [args...].
+    return vim.list_extend({ term, "-e" }, cmd_parts)
+  end
+end
+
 local function open_ssh_terminal(name, password)
   local conn = get_connection(name)
   if not conn then return end
@@ -434,7 +457,7 @@ local function open_ssh_terminal(name, password)
     vim.list_extend(cmd_parts, { "-p", tostring(conn.port) })
   end
   if conn.identity_file and conn.identity_file ~= "" then
-    vim.list_extend(cmd_parts, { "-i", conn.identity_file })
+    vim.list_extend(cmd_parts, { "-i", vim.fn.expand(conn.identity_file) })
   end
   table.insert(cmd_parts, conn.user .. "@" .. conn.host)
 
@@ -442,7 +465,7 @@ local function open_ssh_terminal(name, password)
     local custom = M.config.terminal_emulator
     if custom and custom ~= "" then
       if vim.fn.executable(custom) == 1 then
-        vim.fn.jobstart({ custom, "-e", table.concat(cmd_parts, " ") }, { detach = true })
+        vim.fn.jobstart(terminal_args(custom, cmd_parts), { detach = true })
         return
       end
       ui.notify("sshinator: configured terminal emulator not found: " .. custom, vim.log.levels.WARN)
@@ -451,7 +474,7 @@ local function open_ssh_terminal(name, password)
 
     for _, t in ipairs({ "xterm", "kitty", "alacritty", "wezterm", "gnome-terminal", "xfce4-terminal", "lxterminal", "konsole", "urxvt", "st" }) do
       if vim.fn.executable(t) == 1 then
-        vim.fn.jobstart({ t, "-e", table.concat(cmd_parts, " ") }, { detach = true })
+        vim.fn.jobstart(terminal_args(t, cmd_parts), { detach = true })
         return
       end
     end
