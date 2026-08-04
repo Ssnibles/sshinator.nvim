@@ -161,14 +161,6 @@ local function mount_dir(name)
 end
 
 local function is_mounted(name, on_done)
-  if mount_cache[name] == false then
-    on_done(false)
-    return
-  end
-  if mount_cache[name] == true then
-    on_done(true)
-    return
-  end
   local dir = mount_dir(name)
   if vim.fn.isdirectory(dir) == 0 then
     mount_cache[name] = false
@@ -177,8 +169,43 @@ local function is_mounted(name, on_done)
   end
   run_cmd({ "mountpoint", "-q", dir }, function(r)
     local mounted = r and r.code == 0
-    mount_cache[name] = mounted
-    on_done(mounted)
+    if not mounted then
+      mount_cache[name] = false
+      on_done(false)
+      return
+    end
+    -- A mountpoint can exist while the underlying SSH connection is dead.
+    -- Verify it is actually responsive before reporting it as mounted.
+    run_cmd({ "stat", dir }, { timeout = 3000 }, function(sr)
+      if sr and sr.code == 0 then
+        mount_cache[name] = true
+        on_done(true)
+        return
+      end
+      -- Mount is stale; tear it down so reconnect can create a fresh one.
+      mount_cache[name] = false
+      kill_stale_rclone(dir)
+      run_cmd({ "fusermount3", "-uz", dir }, { timeout = 5000 }, function(ur)
+        if ur and ur.code == 0 then
+          vim.fn.delete(dir, "d")
+          on_done(false)
+          return
+        end
+        run_cmd({ "fusermount", "-uz", dir }, { timeout = 5000 }, function(ur2)
+          if ur2 and ur2.code == 0 then
+            vim.fn.delete(dir, "d")
+            on_done(false)
+            return
+          end
+          run_cmd({ "umount", "-l", dir }, { timeout = 5000 }, function(ur3)
+            if ur3 and ur3.code == 0 then
+              vim.fn.delete(dir, "d")
+            end
+            on_done(false)
+          end)
+        end)
+      end)
+    end)
   end)
 end
 
@@ -213,30 +240,57 @@ local function is_password_error(output)
     or lower:find("connection failed")
 end
 
+local function kill_stale_rclone(mount_point)
+  if vim.fn.executable("pkill") == 0 then return end
+  -- Match the exact mount point in the rclone command line.
+  local pattern = "rclone.*" .. vim.fn.escape(mount_point, "/.") .. ".*"
+  run_cmd({ "pkill", "-f", pattern }, { timeout = 3000 }, function() end)
+end
+
 local function unmount_rclone(name, on_done)
   local dir = mount_dir(name)
+  kill_stale_rclone(dir)
   is_mounted(name, function(mounted)
     if not mounted then
       mount_cache[name] = false
       if on_done then on_done(true) end
       return
     end
-    local umount_cmd
-    if vim.fn.executable("fusermount3") == 1 then
-      umount_cmd = { "fusermount3", "-u", dir }
-    elseif vim.fn.executable("fusermount") == 1 then
-      umount_cmd = { "fusermount", "-u", dir }
-    else
-      umount_cmd = { "umount", dir }
+
+    local function try_umount(methods, cb)
+      if #methods == 0 then
+        cb(nil, "unmount failed")
+        return
+      end
+      local method = methods[1]
+      local rest = vim.list_slice(methods, 2)
+      run_cmd(method, { timeout = 5000 }, function(r)
+        if r and r.code == 0 then
+          cb(true)
+        else
+          try_umount(rest, cb)
+        end
+      end)
     end
-    run_cmd(umount_cmd, { timeout = 5000 }, function(r)
-      if r and r.code == 0 then
+
+    local umount_methods = {}
+    if vim.fn.executable("fusermount3") == 1 then
+      table.insert(umount_methods, { "fusermount3", "-uz", dir })
+      table.insert(umount_methods, { "fusermount3", "-u", dir })
+    end
+    if vim.fn.executable("fusermount") == 1 then
+      table.insert(umount_methods, { "fusermount", "-uz", dir })
+      table.insert(umount_methods, { "fusermount", "-u", dir })
+    end
+    table.insert(umount_methods, { "umount", "-l", dir })
+    table.insert(umount_methods, { "umount", dir })
+
+    try_umount(umount_methods, function(ok, err)
+      if ok then
         vim.fn.delete(dir, "d")
         mount_cache[name] = false
-        if on_done then on_done(true) end
-      else
-        if on_done then on_done(nil, "unmount failed") end
       end
+      if on_done then on_done(ok, err) end
     end)
   end)
 end
