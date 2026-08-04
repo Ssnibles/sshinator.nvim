@@ -495,6 +495,70 @@ local function open_ssh_terminal(name, password)
   end, 100)
 end
 
+local function current_connection()
+  local base = mount_dir("")
+  if base:sub(-1) == "/" then
+    base = base:sub(1, -2)
+  end
+
+  local cwd = vim.fn.getcwd()
+  if cwd:find(base, 1, true) == 1 then
+    local rest = cwd:sub(#base + 2)
+    return rest:match("^([^/]+)")
+  end
+
+  local buf_path = vim.fn.expand("%:p")
+  if buf_path and buf_path ~= "" and buf_path:find(base, 1, true) == 1 then
+    local rest = buf_path:sub(#base + 2)
+    return rest:match("^([^/]+)")
+  end
+
+  return nil
+end
+
+function M.open_terminal(name)
+  if not name then
+    name = current_connection()
+    if not name then
+      local cfg = M._load_config()
+      if #cfg.connections == 0 then
+        ui.notify("sshinator: no connections configured", vim.log.levels.INFO)
+        return
+      end
+      local items = {}
+      for _, conn in ipairs(cfg.connections) do
+        local auth = conn.password_auth and " [password]" or ""
+        table.insert(items, string.format("%s (%s@%s:%d)%s", conn.name, conn.user, conn.host, conn.port or 22, auth))
+      end
+      ui.select(items, { prompt = "Open SSH Terminal" }, function(choice)
+        if not choice then return end
+        local selected_name = choice:match("^(%S+)")
+        M.open_terminal(selected_name)
+      end)
+      return
+    end
+  end
+
+  local conn = get_connection(name)
+  if not conn then
+    ui.notify("sshinator: connection '" .. name .. "' not found", vim.log.levels.ERROR)
+    return
+  end
+
+  if conn.password_auth then
+    ui.input({ prompt = "Password for " .. name, mask = true }, function(pw)
+      if not pw then
+        open_ssh_terminal(name, nil)
+        return
+      end
+      open_ssh_terminal(name, pw)
+    end)
+    return
+  end
+
+  open_ssh_terminal(name, nil)
+end
+
 local function do_connect(name, password)
   local conn = get_connection(name)
   if not conn then
@@ -888,7 +952,7 @@ function M.list_connections()
   ui.select(items, { prompt = "Connections" }, function(choice)
     if not choice then return end
     local name = choice:match("^(%S+)")
-    local actions = { "Connect", "Disconnect", "Reconnect", "Edit", "Status", "Remove" }
+    local actions = { "Connect", "Disconnect", "Reconnect", "Edit", "Status", "Terminal", "Remove" }
     ui.select(actions, { prompt = name .. " - Action" }, function(action)
       if not action then return end
       if action == "Connect" then
@@ -916,6 +980,8 @@ function M.list_connections()
           local msg = mounted and string.format("MOUNTED at %s", dir) or "not mounted"
           ui.notify("sshinator: " .. name .. " - " .. msg, vim.log.levels.INFO)
         end)
+      elseif action == "Terminal" then
+        M.open_terminal(name)
       elseif action == "Remove" then
         local cfg2 = M._load_config()
         for i, conn in ipairs(cfg2.connections) do

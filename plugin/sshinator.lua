@@ -42,6 +42,11 @@ vim.api.nvim_create_user_command("SshinatorReconnect", cmd(function(opts)
   sshinator.reconnect(name)
 end), { desc = "Reconnect to a mounted SSH host", nargs = "?", complete = complete_connections })
 
+vim.api.nvim_create_user_command("SshinatorTerminal", cmd(function(opts)
+  local name = opts.args ~= "" and opts.args or nil
+  sshinator.open_terminal(name)
+end), { desc = "Open an SSH terminal for a connection", nargs = "?", complete = complete_connections })
+
 vim.api.nvim_create_user_command("SshinatorAdd", cmd(function()
   sshinator.add_connection()
 end), { desc = "Add a new SSH connection" })
