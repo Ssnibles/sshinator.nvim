@@ -44,8 +44,12 @@ end), { desc = "Reconnect to a mounted SSH host", nargs = "?", complete = comple
 
 vim.api.nvim_create_user_command("SshinatorTerminal", cmd(function(opts)
   local name = opts.args ~= "" and opts.args or nil
-  sshinator.open_terminal(name)
-end), { desc = "Open an SSH terminal for a connection", nargs = "?", complete = complete_connections })
+  local force_external = nil
+  if opts.bang then
+    force_external = not sshinator.config.external_terminal
+  end
+  sshinator.open_terminal(name, force_external)
+end), { desc = "Open an SSH terminal for a connection (use ! to invert external_terminal)", nargs = "?", bang = true, complete = complete_connections })
 
 vim.api.nvim_create_user_command("SshinatorAdd", cmd(function()
   sshinator.add_connection()

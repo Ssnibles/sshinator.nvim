@@ -89,7 +89,7 @@ All commands support tab completion for connection names where applicable.
 - `:SshinatorDisconnect [name]` - Disconnect from a mounted host (picker if no name provided)
 - `:SshinatorDisconnectAll` - Disconnect all mounted hosts
 - `:SshinatorReconnect [name]` - Reconnect to a mounted host (picker if no name provided)
-- `:SshinatorTerminal [name]` - Open an SSH terminal for a connection (uses the current connection or a picker if no name provided)
+- `:SshinatorTerminal [name]` - Open an SSH terminal for a connection (uses the current connection or a picker if no name provided; respects `external_terminal`; use `:SshinatorTerminal!` to invert)
 - `:SshinatorRemove [name]` - Remove a connection (picker if no name provided)
 - `:SshinatorEdit [name]` - Edit a connection (picker if no name provided)
 - `:SshinatorStatus` - Show status of all connections in a floating window dashboard

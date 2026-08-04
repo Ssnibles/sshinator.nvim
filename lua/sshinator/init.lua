@@ -439,7 +439,7 @@ local function terminal_args(term, cmd_parts)
   end
 end
 
-local function open_ssh_terminal(name, password)
+local function open_ssh_terminal(name, password, force_external)
   local conn = get_connection(name)
   if not conn then return end
 
@@ -461,7 +461,12 @@ local function open_ssh_terminal(name, password)
   end
   table.insert(cmd_parts, conn.user .. "@" .. conn.host)
 
-  if M.config.external_terminal then
+  local use_external = force_external
+  if use_external == nil then
+    use_external = M.config.external_terminal
+  end
+
+  if use_external then
     local custom = M.config.terminal_emulator
     if custom and custom ~= "" then
       if vim.fn.executable(custom) == 1 then
@@ -516,7 +521,7 @@ local function current_connection()
   return nil
 end
 
-function M.open_terminal(name)
+function M.open_terminal(name, force_external)
   if not name then
     name = current_connection()
     if not name then
@@ -533,7 +538,7 @@ function M.open_terminal(name)
       ui.select(items, { prompt = "Open SSH Terminal" }, function(choice)
         if not choice then return end
         local selected_name = choice:match("^(%S+)")
-        M.open_terminal(selected_name)
+        M.open_terminal(selected_name, force_external)
       end)
       return
     end
@@ -548,15 +553,15 @@ function M.open_terminal(name)
   if conn.password_auth then
     ui.input({ prompt = "Password for " .. name, mask = true }, function(pw)
       if not pw then
-        open_ssh_terminal(name, nil)
+        open_ssh_terminal(name, nil, force_external)
         return
       end
-      open_ssh_terminal(name, pw)
+      open_ssh_terminal(name, pw, force_external)
     end)
     return
   end
 
-  open_ssh_terminal(name, nil)
+  open_ssh_terminal(name, nil, force_external)
 end
 
 local function do_connect(name, password)
