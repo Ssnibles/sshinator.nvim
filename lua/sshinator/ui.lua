@@ -134,7 +134,7 @@ end
 function M.input(opts, callback)
   opts = opts or {}
   local title = opts.title or opts.prompt or "Input"
-  local default = opts.default or ""
+  local default = tostring(opts.default or "")
   local mask = opts.mask or false
   local width = math.max(50, vim.fn.strdisplaywidth(title) + 20)
 
@@ -672,6 +672,7 @@ function M.input_chain(fields, callback)
   local results = {}
   local idx = 1
   local submitted = false
+  local process_field
 
   local function show_input(field, default_val)
     if field.mask then
@@ -712,7 +713,7 @@ function M.input_chain(fields, callback)
     end
   end
 
-  local function process_field()
+  process_field = function()
     if submitted then return end
     if idx > #fields then
       submitted = true
