@@ -333,7 +333,8 @@ local function do_mount_rclone(name, conn, password, mount_point, on_done)
   }
 
   if conn.identity_file and conn.identity_file ~= "" then
-    table.insert(args, "--sftp-key-file=" .. conn.identity_file)
+    local key_file = vim.fn.expand(conn.identity_file)
+    table.insert(args, "--sftp-key-file=" .. key_file)
   end
 
   local function verify_mount(attempt)
@@ -467,7 +468,11 @@ local function do_connect(name, password)
   if conn.password_auth and not password then
     ui.input({ prompt = "Password for " .. name, mask = true }, function(pw)
       if not pw then
-        ui.notify("sshinator: password required, connection cancelled", vim.log.levels.WARN)
+        if conn.identity_file and conn.identity_file ~= "" then
+          do_connect(name, "")
+        else
+          ui.notify("sshinator: password required, connection cancelled", vim.log.levels.WARN)
+        end
         return
       end
       do_connect(name, pw)
@@ -531,7 +536,7 @@ function M.add_connection(opts)
         user = results.user,
         port = tonumber(results.port) or 22,
         remote_path = results.remote_path or ".",
-        identity_file = results.identity_file ~= "" and results.identity_file or nil,
+        identity_file = results.identity_file ~= "" and vim.fn.expand(results.identity_file) or nil,
         password_auth = password_auth == true,
       }
 
@@ -613,7 +618,7 @@ function M.edit_connection(name)
           user = results.user,
           port = tonumber(results.port) or 22,
           remote_path = results.remote_path or ".",
-          identity_file = results.identity_file ~= "" and results.identity_file or nil,
+          identity_file = results.identity_file ~= "" and vim.fn.expand(results.identity_file) or nil,
           password_auth = password_auth == true,
         }
 
