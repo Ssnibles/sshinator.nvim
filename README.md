@@ -214,6 +214,7 @@ require("sshinator").setup({
 
   -- User experience
   external_terminal = false,        -- open SSH terminal in external emulator
+  terminal_emulator = nil,          -- specific terminal command to use (e.g. "alacritty")
   auto_terminal = true,             -- open an SSH terminal automatically on connect
   auto_chdir = true,                -- cd to mount point + open dir on connect
 

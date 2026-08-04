@@ -6,6 +6,7 @@ M.config = {
   notify_duration = 5000,
   request_timeout = 30000,
   external_terminal = false,
+  terminal_emulator = nil,
   auto_terminal = true,
   auto_chdir = true,
   vfs_cache_mode = "writes",
@@ -95,6 +96,7 @@ function M.setup(opts)
   opts = opts or {}
   M.config.auto_check_deps = opts.auto_check_deps ~= false
   M.config.external_terminal = opts.external_terminal or false
+  M.config.terminal_emulator = opts.terminal_emulator or nil
   M.config.auto_terminal = opts.auto_terminal ~= false
   M.config.auto_chdir = opts.auto_chdir ~= false
   M.config.notify_duration = opts.notify_duration or 5000
@@ -437,6 +439,16 @@ local function open_ssh_terminal(name, password)
   table.insert(cmd_parts, conn.user .. "@" .. conn.host)
 
   if M.config.external_terminal then
+    local custom = M.config.terminal_emulator
+    if custom and custom ~= "" then
+      if vim.fn.executable(custom) == 1 then
+        vim.fn.jobstart({ custom, "-e", table.concat(cmd_parts, " ") }, { detach = true })
+        return
+      end
+      ui.notify("sshinator: configured terminal emulator not found: " .. custom, vim.log.levels.WARN)
+      return
+    end
+
     for _, t in ipairs({ "xterm", "kitty", "alacritty", "wezterm", "gnome-terminal", "xfce4-terminal", "lxterminal", "konsole", "urxvt", "st" }) do
       if vim.fn.executable(t) == 1 then
         vim.fn.jobstart({ t, "-e", table.concat(cmd_parts, " ") }, { detach = true })
