@@ -6,6 +6,7 @@ M.config = {
   notify_duration = 5000,
   request_timeout = 30000,
   external_terminal = false,
+  auto_terminal = true,
   auto_chdir = true,
   vfs_cache_mode = "writes",
   dir_cache_time = "5m",
@@ -94,6 +95,7 @@ function M.setup(opts)
   opts = opts or {}
   M.config.auto_check_deps = opts.auto_check_deps ~= false
   M.config.external_terminal = opts.external_terminal or false
+  M.config.auto_terminal = opts.auto_terminal ~= false
   M.config.auto_chdir = opts.auto_chdir ~= false
   M.config.notify_duration = opts.notify_duration or 5000
   M.config.request_timeout = opts.request_timeout or 60000
@@ -509,7 +511,9 @@ local function do_connect(name, password)
       end)
     end
 
-    open_ssh_terminal(name, password)
+    if M.config.auto_terminal then
+      open_ssh_terminal(name, password)
+    end
   end)
 end
 
