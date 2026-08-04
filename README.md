@@ -203,7 +203,7 @@ You can edit this file directly or use the plugin commands.
 
 ### Plugin Options
 
-All options are set via `require("sshinator").setup({...})`:
+All options are set via `require("sshinator").setup({...})`.
 
 ```lua
 require("sshinator").setup({
@@ -213,10 +213,10 @@ require("sshinator").setup({
   request_timeout = 60000,          -- ms timeout for mount operations
 
   -- User experience
-  external_terminal = false,        -- open SSH terminal in external emulator
+  external_terminal = false,        -- open SSH terminal in an external emulator
   terminal_emulator = nil,          -- specific terminal command to use (e.g. "alacritty")
   auto_terminal = true,             -- open an SSH terminal automatically on connect
-  auto_chdir = true,                -- cd to mount point + open dir on connect
+  auto_chdir = true,                -- cd to mount point and open it on connect
 
   -- rclone performance tuning
   vfs_cache_mode = "writes",        -- off | minimal | writes | full
@@ -225,8 +225,56 @@ require("sshinator").setup({
   checkers = 8,                     -- parallel file checkers
 
   -- Paths (nil = use XDG defaults)
-  cache_dir = nil,                  -- rclone VFS cache dir (default: $XDG_CACHE_HOME/sshinator/rclone)
-  mount_base = nil,                 -- base dir for mounts (default: $XDG_DATA_HOME/sshinator/mounts)
+  cache_dir = nil,                  -- rclone VFS cache dir
+  mount_base = nil,                 -- base dir for mounts
+})
+```
+
+#### Option Reference
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `auto_check_deps` | `boolean` | `true` | Run a health check at startup and warn if `ssh`, `rclone`, or `fusermount`/`umount` are missing. |
+| `notify_duration` | `integer` | `5000` | Time in milliseconds that notification messages stay visible. |
+| `request_timeout` | `integer` | `60000` | Timeout in milliseconds for mount and unmount operations. |
+| `external_terminal` | `boolean` | `false` | When `true`, open the SSH terminal in an external terminal emulator instead of a Neovim split. |
+| `terminal_emulator` | `string` | `nil` | Command to use when `external_terminal` is `true`. If `nil`, the plugin auto-detects from a list of common emulators (`xterm`, `kitty`, `alacritty`, `wezterm`, `gnome-terminal`, etc.). |
+| `auto_terminal` | `boolean` | `true` | When `true`, automatically open an SSH terminal after a successful connection. Set to `false` to only mount the remote filesystem without opening a terminal. |
+| `auto_chdir` | `boolean` | `true` | When `true`, change the current working directory to the mount point and open it in the current window after connecting. |
+| `vfs_cache_mode` | `string` | `"writes"` | rclone VFS cache mode. Options: `off`, `minimal`, `writes`, `full`. |
+| `dir_cache_time` | `string` | `"5m"` | How long rclone caches directory listings. |
+| `transfers` | `integer` | `4` | Number of parallel file transfers for rclone. |
+| `checkers` | `integer` | `8` | Number of parallel file checkers for rclone. |
+| `cache_dir` | `string` | `nil` | Directory for rclone VFS cache. Defaults to `$XDG_CACHE_HOME/sshinator/rclone` (or `~/.cache/sshinator/rclone`). |
+| `mount_base` | `string` | `nil` | Base directory for remote mounts. Defaults to `$XDG_DATA_HOME/sshinator/mounts` (or `~/.local/share/sshinator/mounts`). |
+
+#### Example Configurations
+
+Disable the automatic terminal split:
+
+```lua
+require("sshinator").setup({
+  auto_terminal = false,
+})
+```
+
+Use a specific external terminal for SSH sessions:
+
+```lua
+require("sshinator").setup({
+  external_terminal = true,
+  terminal_emulator = "alacritty",
+})
+```
+
+Tighten rclone caching for frequently changing files:
+
+```lua
+require("sshinator").setup({
+  vfs_cache_mode = "full",
+  dir_cache_time = "1m",
+  transfers = 8,
+  checkers = 16,
 })
 ```
 
