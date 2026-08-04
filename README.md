@@ -96,6 +96,24 @@ All commands support tab completion for connection names where applicable.
 - `:SshinatorList` - List and manage connections (with action picker including Connect, Disconnect, Reconnect, Edit, Status, Terminal, Remove)
 - `:SshinatorHealth` - Run sshinator health check (also available via `:checkhealth sshinator`)
 
+### SSH Terminal
+
+You can open (or reopen) an SSH terminal for a connection with `:SshinatorTerminal`:
+
+```
+:SshinatorTerminal
+:SshinatorTerminal my-server
+```
+
+With no arguments, the plugin tries to use the connection from your current working directory or buffer. If it can't determine one, it shows the connection picker.
+
+By default the command follows your `external_terminal` setting. Use `:SshinatorTerminal!` to invert it:
+
+- If `external_terminal` is `false`, `:SshinatorTerminal` opens inside Neovim and `:SshinatorTerminal!` opens in the external emulator.
+- If `external_terminal` is `true`, the opposite happens.
+
+You can also launch a terminal from `:SshinatorList` by selecting the **Terminal** action.
+
 ### Floating Window UI
 
 All interactions use custom floating windows:
