@@ -46,6 +46,14 @@ local function get_connection(name)
   return nil
 end
 
+local function identity_file(conn)
+  local idf = conn.identity_file
+  if not idf or idf == "" or idf == "v:null" then
+    return nil
+  end
+  return idf
+end
+
 local function run_cmd(args, opts, on_done)
   if type(opts) == "function" then
     on_done = opts
@@ -336,9 +344,9 @@ local function do_mount_rclone(name, conn, password, mount_point, on_done)
     "--sftp-sha1sum-command=none",
   }
 
-  if conn.identity_file and conn.identity_file ~= "" then
-    local key_file = vim.fn.expand(conn.identity_file)
-    table.insert(args, "--sftp-key-file=" .. key_file)
+  local idf = identity_file(conn)
+  if idf then
+    table.insert(args, "--sftp-key-file=" .. vim.fn.expand(idf))
   end
 
   local function verify_mount(attempt)
@@ -456,8 +464,9 @@ local function open_ssh_terminal(name, password, force_external)
   if conn.port and conn.port ~= 22 then
     vim.list_extend(cmd_parts, { "-p", tostring(conn.port) })
   end
-  if conn.identity_file and conn.identity_file ~= "" then
-    vim.list_extend(cmd_parts, { "-i", vim.fn.expand(conn.identity_file) })
+  local idf = identity_file(conn)
+  if idf then
+    vim.list_extend(cmd_parts, { "-i", vim.fn.expand(idf) })
   end
   table.insert(cmd_parts, conn.user .. "@" .. conn.host)
 
@@ -573,9 +582,9 @@ local function do_connect(name, password)
 
   if conn.password_auth and not password then
     ui.input({ prompt = "Password for " .. name, mask = true }, function(pw)
-      if not pw then
-        if conn.identity_file and conn.identity_file ~= "" then
-          do_connect(name, "")
+if not pw then
+          if identity_file(conn) then
+            do_connect(name, "")
         else
           ui.notify("sshinator: password required, connection cancelled", vim.log.levels.WARN)
         end
@@ -644,12 +653,12 @@ function M.add_connection(opts)
         user = results.user,
         port = tonumber(results.port) or 22,
         remote_path = results.remote_path or ".",
-        identity_file = results.identity_file ~= "" and vim.fn.expand(results.identity_file) or nil,
-        password_auth = password_auth == true,
-      }
+identity_file = (results.identity_file or "") ~= "" and vim.fn.expand(results.identity_file) or nil,
+          password_auth = password_auth == true,
+        }
 
-      local cfg = M._load_config()
-      for _, c in ipairs(cfg.connections) do
+        local cfg = M._load_config()
+        for _, c in ipairs(cfg.connections) do
         if c.name == conn.name then
           ui.notify("sshinator: connection '" .. conn.name .. "' already exists", vim.log.levels.WARN)
           return
@@ -665,7 +674,7 @@ function M.add_connection(opts)
         end
 
         local test_args = { "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-p", tostring(conn.port), "-l", conn.user, conn.host, "exit" }
-        if conn.identity_file then
+        if identity_file(conn) then
           vim.list_extend(test_args, { "-i", conn.identity_file })
         end
 
@@ -726,7 +735,7 @@ function M.edit_connection(name)
           user = results.user,
           port = tonumber(results.port) or 22,
           remote_path = results.remote_path or ".",
-          identity_file = results.identity_file ~= "" and vim.fn.expand(results.identity_file) or nil,
+          identity_file = (results.identity_file or "") ~= "" and vim.fn.expand(results.identity_file) or nil,
           password_auth = password_auth == true,
         }
 
