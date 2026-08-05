@@ -159,25 +159,11 @@ function M.input(opts, callback)
   vim.b[buf].completion = false
 
   local submitted = false
-  local real_value = default
-
-  local function set_content(text)
-    vim.bo[buf].modifiable = true
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { text })
-    vim.bo[buf].modifiable = false
-  end
-
-  local function get_value()
-    if mask then
-      return real_value
-    end
-    return vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or ""
-  end
 
   local function submit()
     if submitted then return end
     submitted = true
-    local value = get_value()
+    local value = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or ""
     close_float(win, buf)
     vim.cmd("stopinsert")
     callback(value ~= "" and value or nil)
@@ -191,42 +177,16 @@ function M.input(opts, callback)
     callback(nil)
   end
 
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { default })
+
   if mask then
-    set_content(string.rep("*", #default))
-    vim.cmd("startinsert!")
-
-    local function update_display()
-      if not vim.api.nvim_buf_is_valid(buf) then return end
-      set_content(string.rep("*", #real_value))
-      if vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_win_set_cursor(win, { 1, #real_value })
-      end
-    end
-
-    vim.api.nvim_create_autocmd({ "InsertCharPre" }, {
-      buffer = buf,
-      callback = function()
-        local char = vim.v.char
-        if char == "" or char == "\r" or char == "\n" then
-          return
-        end
-        real_value = real_value .. char
-        vim.v.char = ""
-        vim.schedule(update_display)
-      end,
-    })
-
-    vim.keymap.set("i", "<BS>", function()
-      if #real_value > 0 then
-        real_value = real_value:sub(1, -2)
-        update_display()
-      end
-    end, { buffer = buf, noremap = true })
-  else
-    vim.bo[buf].modifiable = true
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { default })
-    vim.cmd("startinsert!")
+    vim.wo[win].conceallevel = 2
+    vim.wo[win].concealcursor = "nvic"
+    vim.fn.matchadd("Conceal", ".", 10, -1, { conceal = "*" })
   end
+
+  vim.cmd("startinsert!")
 
   vim.keymap.set("i", "<CR>", submit, { buffer = buf, noremap = true })
   vim.keymap.set("n", "<CR>", submit, { buffer = buf, noremap = true })

@@ -19,13 +19,13 @@ M.config = {
 
 local mount_cache = {}
 
-local function config_path()
+function M.config_path()
   local base = vim.env.XDG_CONFIG_HOME or (vim.fn.expand("~") .. "/.config")
   return base .. "/sshinator/connections.json"
 end
 
 function M._load_config()
-  local path = config_path()
+  local path = M.config_path()
   local ok, data = pcall(vim.fn.readfile, path)
   if not ok then return { connections = {} } end
   local ok, cfg = pcall(vim.fn.json_decode, table.concat(data, "\n"))
@@ -33,7 +33,7 @@ function M._load_config()
 end
 
 local function save_config(cfg)
-  local path = config_path()
+  local path = M.config_path()
   vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
   vim.fn.writefile(vim.split(vim.fn.json_encode(cfg), "\n"), path)
 end
@@ -172,6 +172,46 @@ local function mount_dir(name)
   return base .. "/sshinator/mounts/" .. name:gsub("[%s/\\:]", "_")
 end
 
+local function kill_stale_rclone(mount_point)
+  if vim.fn.executable("pkill") == 0 then return end
+  -- Match the exact mount point in the rclone command line.
+  local pattern = "rclone.*" .. vim.fn.escape(mount_point, "/.") .. ".*"
+  run_cmd({ "pkill", "-f", pattern }, { timeout = 3000 }, function() end)
+end
+
+local function force_unmount(dir, on_done)
+  local umount_methods = {}
+  if vim.fn.executable("fusermount3") == 1 then
+    table.insert(umount_methods, { "fusermount3", "-uz", dir })
+    table.insert(umount_methods, { "fusermount3", "-u", dir })
+  end
+  if vim.fn.executable("fusermount") == 1 then
+    table.insert(umount_methods, { "fusermount", "-uz", dir })
+    table.insert(umount_methods, { "fusermount", "-u", dir })
+  end
+  table.insert(umount_methods, { "umount", "-l", dir })
+  table.insert(umount_methods, { "umount", dir })
+
+  local function try_umount(methods)
+    if #methods == 0 then
+      if on_done then on_done(false, "unmount failed") end
+      return
+    end
+    local method = methods[1]
+    local rest = vim.list_slice(methods, 2)
+    run_cmd(method, { timeout = 5000 }, function(r)
+      if r and r.code == 0 then
+        vim.fn.delete(dir, "d")
+        if on_done then on_done(true) end
+      else
+        try_umount(rest)
+      end
+    end)
+  end
+
+  try_umount(umount_methods)
+end
+
 local function is_mounted(name, on_done)
   local dir = mount_dir(name)
   if vim.fn.isdirectory(dir) == 0 then
@@ -197,25 +237,8 @@ local function is_mounted(name, on_done)
       -- Mount is stale; tear it down so reconnect can create a fresh one.
       mount_cache[name] = false
       kill_stale_rclone(dir)
-      run_cmd({ "fusermount3", "-uz", dir }, { timeout = 5000 }, function(ur)
-        if ur and ur.code == 0 then
-          vim.fn.delete(dir, "d")
-          on_done(false)
-          return
-        end
-        run_cmd({ "fusermount", "-uz", dir }, { timeout = 5000 }, function(ur2)
-          if ur2 and ur2.code == 0 then
-            vim.fn.delete(dir, "d")
-            on_done(false)
-            return
-          end
-          run_cmd({ "umount", "-l", dir }, { timeout = 5000 }, function(ur3)
-            if ur3 and ur3.code == 0 then
-              vim.fn.delete(dir, "d")
-            end
-            on_done(false)
-          end)
-        end)
+      force_unmount(dir, function()
+        on_done(false)
       end)
     end)
   end)
@@ -252,13 +275,6 @@ local function is_password_error(output)
     or lower:find("connection failed")
 end
 
-local function kill_stale_rclone(mount_point)
-  if vim.fn.executable("pkill") == 0 then return end
-  -- Match the exact mount point in the rclone command line.
-  local pattern = "rclone.*" .. vim.fn.escape(mount_point, "/.") .. ".*"
-  run_cmd({ "pkill", "-f", pattern }, { timeout = 3000 }, function() end)
-end
-
 local function unmount_rclone(name, on_done)
   local dir = mount_dir(name)
   kill_stale_rclone(dir)
@@ -268,38 +284,8 @@ local function unmount_rclone(name, on_done)
       if on_done then on_done(true) end
       return
     end
-
-    local function try_umount(methods, cb)
-      if #methods == 0 then
-        cb(nil, "unmount failed")
-        return
-      end
-      local method = methods[1]
-      local rest = vim.list_slice(methods, 2)
-      run_cmd(method, { timeout = 5000 }, function(r)
-        if r and r.code == 0 then
-          cb(true)
-        else
-          try_umount(rest, cb)
-        end
-      end)
-    end
-
-    local umount_methods = {}
-    if vim.fn.executable("fusermount3") == 1 then
-      table.insert(umount_methods, { "fusermount3", "-uz", dir })
-      table.insert(umount_methods, { "fusermount3", "-u", dir })
-    end
-    if vim.fn.executable("fusermount") == 1 then
-      table.insert(umount_methods, { "fusermount", "-uz", dir })
-      table.insert(umount_methods, { "fusermount", "-u", dir })
-    end
-    table.insert(umount_methods, { "umount", "-l", dir })
-    table.insert(umount_methods, { "umount", dir })
-
-    try_umount(umount_methods, function(ok, err)
+    force_unmount(dir, function(ok, err)
       if ok then
-        vim.fn.delete(dir, "d")
         mount_cache[name] = false
       end
       if on_done then on_done(ok, err) end
@@ -321,7 +307,7 @@ local function do_mount_rclone(name, conn, password, mount_point, on_done)
   cache_dir = cache_dir .. "/sshinator/rclone"
   vim.fn.mkdir(cache_dir, "p")
 
-  local log_file = "/tmp/sshinator-rclone-" .. name:gsub("[%s/\\:]", "_") .. ".log"
+  local log_file = cache_dir .. "/" .. name:gsub("[%s/\\:]", "_") .. ".log"
 
   local args = {
     "rclone", "mount",
@@ -457,8 +443,10 @@ local function open_ssh_terminal(name, password, force_external)
   end
 
   local cmd_parts = {}
+  local env = nil
   if password and password ~= "" and vim.fn.executable("sshpass") == 1 then
-    vim.list_extend(cmd_parts, { "sshpass", "-p", password })
+    vim.list_extend(cmd_parts, { "sshpass", "-e" })
+    env = { SSHPASS = password }
   end
   vim.list_extend(cmd_parts, { "ssh" })
   if conn.port and conn.port ~= 22 then
@@ -477,9 +465,11 @@ local function open_ssh_terminal(name, password, force_external)
 
   if use_external then
     local custom = M.config.terminal_emulator
+    local job_opts = { detach = true }
+    if env then job_opts.env = env end
     if custom and custom ~= "" then
       if vim.fn.executable(custom) == 1 then
-        vim.fn.jobstart(terminal_args(custom, cmd_parts), { detach = true })
+        vim.fn.jobstart(terminal_args(custom, cmd_parts), job_opts)
         return
       end
       ui.notify("sshinator: configured terminal emulator not found: " .. custom, vim.log.levels.WARN)
@@ -488,7 +478,7 @@ local function open_ssh_terminal(name, password, force_external)
 
     for _, t in ipairs({ "xterm", "kitty", "alacritty", "wezterm", "gnome-terminal", "xfce4-terminal", "lxterminal", "konsole", "urxvt", "st" }) do
       if vim.fn.executable(t) == 1 then
-        vim.fn.jobstart(terminal_args(t, cmd_parts), { detach = true })
+        vim.fn.jobstart(terminal_args(t, cmd_parts), job_opts)
         return
       end
     end
@@ -500,11 +490,14 @@ local function open_ssh_terminal(name, password, force_external)
     vim.cmd("noautocmd belowright split")
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_var(buf, "oil_disable", true)
-    vim.api.nvim_buf_set_name(buf, "[sshinator] " .. name)
+    local session_name = string.format("[sshinator] %s (%d)", name, buf)
+    vim.api.nvim_buf_set_name(buf, session_name)
     vim.api.nvim_win_set_buf(0, buf)
-    vim.fn.termopen(cmd_parts, { cwd = "/tmp" })
+    local term_opts = { cwd = "/tmp" }
+    if env then term_opts.env = env end
+    vim.fn.termopen(cmd_parts, term_opts)
     vim.bo[buf].filetype = "sshinator-terminal"
-    vim.api.nvim_buf_set_name(buf, "[sshinator] " .. name)
+    vim.api.nvim_buf_set_name(buf, session_name)
     vim.cmd("startinsert")
   end, 100)
 end
@@ -684,7 +677,7 @@ identity_file = (results.identity_file or "") ~= "" and vim.fn.expand(results.id
               ui.notify("sshinator: added connection '" .. conn.name .. "' (not tested)", vim.log.levels.INFO)
               return
             end
-            run_cmd({ "sshpass", "-p", password, "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-p", tostring(conn.port), "-l", conn.user, conn.host, "exit" }, { timeout = 15000 }, function(r)
+            run_cmd({ "sshpass", "-e", "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-p", tostring(conn.port), "-l", conn.user, conn.host, "exit" }, { timeout = 15000, env = { SSHPASS = password } }, function(r)
               if r and r.code == 0 then
                 ui.notify("sshinator: connection test successful!", vim.log.levels.INFO)
               else
@@ -1062,34 +1055,59 @@ function M.sudo_write()
       return
     end
 
-    local cmd = string.format(
-      "sshpass -p %q scp -o StrictHostKeyChecking=no -P %d %s %s@%s:/tmp/sshinator_sudo_tmp && sshpass -p %q ssh -o StrictHostKeyChecking=no -p %d %s@%s 'echo %q | sudo -S mv /tmp/sshinator_sudo_tmp %s'",
-      password,
-      conn.port or 22,
-      tmp_file,
-      conn.user,
-      conn.host,
-      password,
-      conn.port or 22,
-      conn.user,
-      conn.host,
-      password,
-      remote_path
-    )
+    local remote_tmp = "/tmp/sshinator_sudo_tmp_" .. conn_name:gsub("[%s/\\:]", "_") .. "_" .. tostring(os.time())
 
-    vim.fn.jobstart(cmd, {
-      on_exit = function(_, code)
+    local scp_args = {
+      "sshpass", "-e", "scp",
+      "-o", "StrictHostKeyChecking=no",
+      "-P", tostring(conn.port or 22),
+      tmp_file,
+      string.format("%s@%s:%s", conn.user, conn.host, remote_tmp)
+    }
+
+    ui.notify("sshinator: writing temporary file to remote host...", vim.log.levels.INFO)
+    run_cmd(scp_args, { env = { SSHPASS = password }, timeout = 15000 }, function(r)
+      if not r or r.code ~= 0 then
         vim.fn.delete(tmp_file)
-        vim.schedule(function()
-          if code == 0 then
-            ui.notify("sshinator: file written with sudo", vim.log.levels.INFO)
-            vim.cmd("edit!")
-          else
-            ui.notify("sshinator: sudo write failed (exit code " .. code .. ")", vim.log.levels.ERROR)
-          end
-        end)
-      end,
-    })
+        local err_msg = r and r.stderr or ""
+        if err_msg ~= "" then
+          err_msg = ": " .. err_msg:gsub("\n", " | "):sub(1, 200)
+        end
+        ui.notify("sshinator: scp failed" .. err_msg, vim.log.levels.ERROR)
+        return
+      end
+
+      local ssh_args = {
+        "sshpass", "-e", "ssh",
+        "-o", "StrictHostKeyChecking=no",
+        "-p", tostring(conn.port or 22),
+        string.format("%s@%s", conn.user, conn.host),
+        string.format("sudo -S mv %s %s", remote_tmp, vim.fn.shellescape(remote_path))
+      }
+
+      local ssh_job = vim.fn.jobstart(ssh_args, {
+        env = { SSHPASS = password },
+        on_exit = function(_, code)
+          vim.fn.delete(tmp_file)
+          vim.schedule(function()
+            if code == 0 then
+              ui.notify("sshinator: file written with sudo", vim.log.levels.INFO)
+              vim.cmd("edit!")
+            else
+              ui.notify("sshinator: sudo write failed (exit code " .. code .. ")", vim.log.levels.ERROR)
+            end
+          end)
+        end
+      })
+
+      if ssh_job > 0 then
+        vim.fn.chansend(ssh_job, password .. "\n")
+        vim.fn.chanclose(ssh_job, "stdin")
+      else
+        vim.fn.delete(tmp_file)
+        ui.notify("sshinator: failed to start ssh for sudo write", vim.log.levels.ERROR)
+      end
+    end)
   end)
 end
 

@@ -37,7 +37,7 @@ function M.check()
     health.warn("sshpass not found; password authentication not available")
   end
 
-  local config_path = vim.fn.stdpath("config"):gsub("/[^/]+$", "") .. "/sshinator/connections.json"
+  local config_path = require("sshinator").config_path()
   if vim.fn.filereadable(config_path) == 1 then
     health.ok("config file found: " .. config_path)
   else

@@ -10,15 +10,12 @@ local function cmd(fn)
 end
 
 local function complete_connections()
-  local config_path = (vim.env.XDG_CONFIG_HOME or (vim.fn.expand("~") .. "/.config"))
-    .. "/sshinator/connections.json"
-  local ok, data = pcall(vim.fn.readfile, config_path)
-  if not ok then return {} end
-  local ok, cfg = pcall(vim.fn.json_decode, table.concat(data, "\n"))
-  if not ok then return {} end
   local names = {}
-  for _, conn in ipairs(cfg.connections or {}) do
-    table.insert(names, conn.name)
+  local ok, cfg = pcall(sshinator._load_config)
+  if ok and cfg and cfg.connections then
+    for _, conn in ipairs(cfg.connections) do
+      table.insert(names, conn.name)
+    end
   end
   return names
 end
