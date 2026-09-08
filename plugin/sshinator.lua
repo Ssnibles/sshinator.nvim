@@ -4,7 +4,7 @@ local function cmd(fn)
   return function(opts)
     local ok, err = pcall(fn, opts)
     if not ok then
-      vim.notify("sshinator: " .. tostring(err), vim.log.levels.ERROR)
+      vim.notify("[sshinator] " .. tostring(err), vim.log.levels.ERROR)
     end
   end
 end
