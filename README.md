@@ -4,15 +4,13 @@ A Neovim plugin for managing and mounting remote SSH connections, similar to VS 
 
 ## Features
 
-- **Floating Window UI**: Beautiful, interactive floating windows for all prompts and selections using the Neovim floating window API
-- **Password Authentication**: Support for hosts that require password authentication via a secure floating password prompt with masked input
+- **Seamless `vim.ui` Integration**: Prompts and pickers integrate natively with `vim.ui`, working out of the box with Telescope, fzf-lua, snacks.picker, dressing.nvim, or stock Neovim
+- **Password Authentication**: Support for hosts that require password authentication with masked input
 - **Connection Testing**: Optionally test connections when adding them to verify they work
-- **Connection Management**: Add, remove, and edit SSH connections via interactive floating window prompts
+- **Connection Management**: Add, remove, and edit SSH connections via interactive prompts
 - **Command Arguments**: Pass connection names directly to commands (e.g., `:SshinatorConnect hostname`) with tab completion
 - **rclone SFTP Mounting**: Fast, async remote filesystem mounting using rclone's SFTP backend with VFS write caching, parallel transfers, and directory caching
-- **Interactive Fuzzy Picker**: Browse and manage connections with a custom floating window picker; type `/` to filter the list
 - **SSH Config Port Detection**: Automatically detects the port from your `~/.ssh/config` when adding connections (async, non-blocking)
-- **Yes/No Confirm Picker**: Clean boolean prompts with a dedicated Yes/No interface
 - **Status Dashboard**: View all connections and their mount status in a dedicated floating window
 - **Persistent Config**: Connections stored in `~/.config/sshinator/connections.json`
 - **Async Operations**: All mount/unmount/status operations are fully async using Neovim's job control
@@ -116,11 +114,8 @@ You can also launch a terminal from `:SshinatorList` by selecting the **Terminal
 
 ### Floating Window UI
 
-All interactions use custom floating windows:
+All interactions use custom, zero-dependency floating windows centered on your screen:
 
-- **Input prompts**: Centred floating windows for text entry (name, host, user, etc.)
-- **Password prompts**: Secure password entry with masked input (displays `*` characters)
-- **Yes/No confirm**: Clean boolean prompts with Yes/No options (j/k to toggle, y/n for quick select)
 - **Selection pickers**: Keyboard-navigable lists with visual highlighting and fuzzy filtering
   - `j`/`k` or `↑`/`↓` to navigate
   - `/` to start filtering the list
@@ -128,8 +123,10 @@ All interactions use custom floating windows:
   - `1`-`9` for quick selection
   - `gg`/`G` to jump to first/last
   - `q` or `<Esc>` to cancel
-- **Status dashboard**: Colour-coded connection status (green for mounted, red for unmounted)
-- **Notifications**: Floating window notifications that auto-dismiss after 5 seconds
+- **Input prompts**: Centred floating windows for text entry (name, host, user, etc.)
+- **Password prompts**: Secure password entry with masked input (displays `*` characters)
+- **Yes/No confirm**: Clean boolean prompts with Yes/No options (j/k to toggle, y/n for quick select)
+- **Status dashboard**: Colour-coded connection status (green for mounted, red for unmounted) via `:SshinatorStatus`
 
 ### Password Authentication
 
@@ -327,8 +324,14 @@ The error notification will also include stderr output from the mount command.
 sshinator.nvim/
 ├── lua/sshinator/
 │   ├── init.lua              # Core rclone mounting and connection logic
-│   ├── ui.lua                # Floating window UI components
-│   └── health.lua            # Health check diagnostics
+│   ├── health.lua            # Health check diagnostics
+│   └── ui/                   # Modular floating window UI library
+│       ├── init.lua          # UI facade (select, input, confirm, status)
+│       ├── float.lua         # Window geometry, borders, and highlights
+│       ├── select.lua        # Floating picker with filter & navigation
+│       ├── input.lua         # Floating input with masked password entry
+│       ├── confirm.lua       # Floating Yes/No confirmation dialog
+│       └── status.lua        # Floating connection status dashboard
 ├── plugin/
 │   └── sshinator.lua         # Neovim command definitions
 ├── default.nix               # Nix package
