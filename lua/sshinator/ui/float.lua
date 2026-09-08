@@ -16,6 +16,13 @@ M.hl_groups = {
 
 local highlights_initialized = false
 
+-- Track previous window and global line number options so floats never mutate user options
+local saved_prev_win = nil
+local saved_global_num = nil
+local saved_global_rnu = nil
+local saved_win_num = nil
+local saved_win_rnu = nil
+
 function M.setup_highlights()
   if highlights_initialized then
     return
@@ -64,6 +71,18 @@ end
 
 function M.create_float(opts)
   M.setup_highlights()
+
+  -- Save current window options and global options before opening float
+  saved_prev_win = vim.api.nvim_get_current_win()
+  saved_global_num = vim.o.number
+  saved_global_rnu = vim.o.relativenumber
+  if saved_prev_win and vim.api.nvim_win_is_valid(saved_prev_win) then
+    pcall(function()
+      saved_win_num = vim.wo[saved_prev_win].number
+      saved_win_rnu = vim.wo[saved_prev_win].relativenumber
+    end)
+  end
+
   local width = opts.width or 50
   local height = opts.height or 10
   local pos = M.calc_center(width, height)
@@ -81,6 +100,7 @@ function M.create_float(opts)
     col = pos.col,
     style = "minimal",
     border = opts.border or "rounded",
+    noautocmd = true,
   }
   if opts.title then
     win_config.title = " " .. opts.title .. " "
@@ -96,8 +116,6 @@ function M.create_float(opts)
   vim.api.nvim_set_option_value("winhl",
     "FloatBorder:" .. M.hl_groups.border .. ",FloatTitle:" .. M.hl_groups.title,
     { win = win })
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
 
   return buf, win
 end
@@ -105,6 +123,24 @@ end
 function M.close_float(win)
   if win and vim.api.nvim_win_is_valid(win) then
     pcall(vim.api.nvim_win_close, win, true)
+  end
+
+  -- Restore global options so new windows/splits retain user settings
+  if saved_global_num ~= nil then
+    pcall(function() vim.o.number = saved_global_num end)
+  end
+  if saved_global_rnu ~= nil then
+    pcall(function() vim.o.relativenumber = saved_global_rnu end)
+  end
+
+  -- Restore previous window local options
+  if saved_prev_win and vim.api.nvim_win_is_valid(saved_prev_win) then
+    if saved_win_num ~= nil then
+      pcall(function() vim.wo[saved_prev_win].number = saved_win_num end)
+    end
+    if saved_win_rnu ~= nil then
+      pcall(function() vim.wo[saved_prev_win].relativenumber = saved_win_rnu end)
+    end
   end
 end
 
