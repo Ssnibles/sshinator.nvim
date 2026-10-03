@@ -4,7 +4,7 @@ A Neovim plugin for managing and mounting remote SSH connections, similar to VS 
 
 ## Features
 
-- **Seamless `vim.ui` Integration**: Prompts and pickers integrate natively with `vim.ui`, working out of the box with Telescope, fzf-lua, snacks.picker, dressing.nvim, or stock Neovim
+- **Custom Floating UI**: Zero-dependency, keyboard-driven floating windows for pickers, prompts, and confirmations that work the same everywhere (no Telescope/fzf-lua/dressing required)
 - **Password Authentication**: Support for hosts that require password authentication with masked input
 - **Connection Testing**: Optionally test connections when adding them to verify they work
 - **Connection Management**: Add, remove, and edit SSH connections via interactive prompts
@@ -20,6 +20,7 @@ A Neovim plugin for managing and mounting remote SSH connections, similar to VS 
 - Neovim 0.8+
 - `rclone` (for SFTP mounting - faster and more reliable than sshfs)
 - `ssh` (for terminal sessions and port detection)
+- `mountpoint` (for detecting mount status)
 - `fusermount` or `fusermount3` (for unmounting)
 - `sshpass` (optional, for password authentication)
 
@@ -93,6 +94,8 @@ All commands support tab completion for connection names where applicable.
 - `:SshinatorStatus` - Show status of all connections in a floating window dashboard
 - `:SshinatorList` - List and manage connections (with action picker including Connect, Disconnect, Reconnect, Edit, Status, Terminal, Remove)
 - `:SshinatorHealth` - Run sshinator health check (also available via `:checkhealth sshinator`)
+- `:SshinatorDiag [path]` - Write diagnostics (options, windows, autocommands, config) to `~/sshinator-diag.txt` (or the given path) and open it
+- `:SshinatorDiagWatch [path]` - Toggle logging of every write to `number`/`relativenumber`, with a Lua traceback of the caller; run again to stop and open the log
 
 ### SSH Terminal
 
@@ -250,7 +253,7 @@ require("sshinator").setup({
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `auto_check_deps` | `boolean` | `true` | Run a health check at startup and warn if `ssh`, `rclone`, or `fusermount`/`umount` are missing. |
+| `auto_check_deps` | `boolean` | `true` | Run a health check at startup and warn if `ssh`, `rclone`, `mountpoint`, or `fusermount`/`umount` are missing. |
 | `notify_duration` | `integer` | `5000` | Time in milliseconds that notification messages stay visible. |
 | `request_timeout` | `integer` | `60000` | Timeout in milliseconds for mount and unmount operations. |
 | `external_terminal` | `boolean` | `false` | When `true`, open the SSH terminal in an external terminal emulator instead of a Neovim split. |
@@ -310,10 +313,12 @@ Cache files are stored at `$XDG_CACHE_HOME/sshinator/rclone/` (defaults to `~/.c
 
 ## Troubleshooting
 
-If a mount fails, check the rclone daemon log:
+If a mount fails, check the rclone daemon log at
+`$XDG_CACHE_HOME/sshinator/rclone/<connection-name>.log` (defaults to
+`~/.cache/sshinator/rclone/<connection-name>.log`):
 
 ```bash
-cat /tmp/sshinator-rclone-<connection-name>.log
+cat ~/.cache/sshinator/rclone/<connection-name>.log
 ```
 
 The error notification will also include stderr output from the mount command.
@@ -325,6 +330,7 @@ sshinator.nvim/
 ├── lua/sshinator/
 │   ├── init.lua              # Core rclone mounting and connection logic
 │   ├── health.lua            # Health check diagnostics
+│   ├── diag.lua              # Option/window diagnostics (`:SshinatorDiag`)
 │   └── ui/                   # Modular floating window UI library
 │       ├── init.lua          # UI facade (select, input, confirm, status)
 │       ├── float.lua         # Window geometry, borders, and highlights
