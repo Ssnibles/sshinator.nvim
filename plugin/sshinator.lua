@@ -73,3 +73,19 @@ end), { desc = "List and manage connections" })
 vim.api.nvim_create_user_command("SshinatorHealth", cmd(function()
   require("sshinator.health").check()
 end), { desc = "Run sshinator health check" })
+
+vim.api.nvim_create_user_command("SshinatorDiag", cmd(function(opts)
+  local path = require("sshinator.diag").open(opts.args ~= "" and opts.args or nil)
+  vim.notify("[sshinator] wrote diagnostics to " .. path, vim.log.levels.INFO)
+end), { desc = "Write sshinator diagnostics to a file (optional path argument)", nargs = "?", complete = "file" })
+
+vim.api.nvim_create_user_command("SshinatorDiagWatch", cmd(function(opts)
+  local path, active = require("sshinator.diag").watch_toggle(opts.args ~= "" and opts.args or nil)
+  if path then
+    if active then
+      vim.notify("[sshinator] option watch active -> " .. path, vim.log.levels.INFO)
+    else
+      vim.notify("[sshinator] option watch stopped; opened " .. path, vim.log.levels.INFO)
+    end
+  end
+end), { desc = "Toggle logging of number/relativenumber writes (run twice: start, then stop+open)", nargs = "?", complete = "file" })
