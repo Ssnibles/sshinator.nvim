@@ -1,12 +1,25 @@
 local M = {}
 
+local notify_duration = 5000
+
 function M.configure(opts)
-  -- Kept for backwards compatibility
+  if opts and opts.notify_duration then
+    notify_duration = opts.notify_duration
+  end
 end
 
 function M.notify(msg, level)
   level = level or vim.log.levels.INFO
-  vim.notify("[sshinator] " .. msg, level)
+  vim.notify("[sshinator] " .. msg, level, { timeout = notify_duration })
+end
+
+---Run `fn` while preserving the global values of the given window-local
+---options. Useful for operations that may trigger user autocommands which set
+---options like `number` (terminals, file managers, ...).
+---@param names string[]|nil
+---@param fn fun()
+function M.preserve_global_opts(names, fn)
+  require("sshinator.ui.float").preserve_global_opts(names, fn)
 end
 
 function M.select(items, opts, callback)

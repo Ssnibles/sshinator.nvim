@@ -44,8 +44,8 @@ function M.open(opts, callback)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { default })
 
   if mask then
-    vim.wo[win].conceallevel = 2
-    vim.wo[win].concealcursor = "nvic"
+    float.set_win_option(win, "conceallevel", 2)
+    float.set_win_option(win, "concealcursor", "nvic")
     vim.fn.matchadd("Conceal", ".", 10, -1, { conceal = "*" })
   end
 

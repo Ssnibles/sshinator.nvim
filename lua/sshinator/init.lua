@@ -477,8 +477,13 @@ local function open_ssh_terminal(name, password, force_external)
     vim.api.nvim_win_set_buf(0, buf)
     local term_opts = { cwd = "/tmp" }
     if env then term_opts.env = env end
-    vim.fn.termopen(cmd_parts, term_opts)
-    vim.bo[buf].filetype = "sshinator-terminal"
+    -- Opening a terminal (and any user `TermOpen`/`FileType` autocommands it
+    -- triggers) can leak `nonumber`/`norelativenumber` into the global option
+    -- defaults, so keep the user's global line-number settings intact.
+    ui.preserve_global_opts({ "number", "relativenumber" }, function()
+      vim.fn.termopen(cmd_parts, term_opts)
+      vim.bo[buf].filetype = "sshinator-terminal"
+    end)
     vim.api.nvim_buf_set_name(buf, session_name)
     vim.cmd("startinsert")
   end, 100)
@@ -570,7 +575,11 @@ local function do_connect(name, password)
       if M.config.auto_chdir then
         vim.fn.chdir(mount_point)
       end
-      vim.cmd("noautocmd edit " .. vim.fn.fnameescape(mount_point))
+      -- File-manager/filetype autocommands may disable line numbers for the
+      -- directory buffer; keep that from clobbering the global defaults.
+      ui.preserve_global_opts({ "number", "relativenumber" }, function()
+        vim.cmd("noautocmd edit " .. vim.fn.fnameescape(mount_point))
+      end)
     end)
 
     if M.config.auto_terminal then
