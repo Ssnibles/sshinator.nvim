@@ -118,7 +118,9 @@ function M.open(items, opts, callback)
     end
     vim.bo[buf].modifiable = true
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, render_lines)
-    vim.bo[buf].modifiable = false
+    -- Keep the buffer modifiable while filtering; `startinsert!` fails with
+    -- E21 on a non-modifiable buffer. Input is intercepted via InsertCharPre.
+    vim.bo[buf].modifiable = filter_mode
 
     local ns = float.get_ns_id()
     vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
@@ -176,12 +178,14 @@ function M.open(items, opts, callback)
   local function enter_filter_mode()
     if filter_mode then return end
     filter_mode = true
+    vim.bo[buf].modifiable = true
     vim.cmd("startinsert!")
   end
 
   local function exit_filter_mode()
     if not filter_mode then return end
     filter_mode = false
+    vim.bo[buf].modifiable = false
     vim.cmd("stopinsert")
   end
 
