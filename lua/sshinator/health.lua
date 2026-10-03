@@ -23,6 +23,12 @@ function M.check()
     health.error("rclone not found; install rclone to use sshinator")
   end
 
+  if vim.fn.executable("mountpoint") == 1 then
+    health.ok("mountpoint found")
+  else
+    health.warn("mountpoint not found; mount status detection will not work")
+  end
+
   if vim.fn.executable("fusermount") == 1 or vim.fn.executable("fusermount3") == 1 then
     health.ok("fusermount/fusermount3 found")
   elseif vim.fn.executable("umount") == 1 then

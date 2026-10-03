@@ -170,7 +170,7 @@ end
 
 function M.check_deps()
   local missing = {}
-  for _, c in ipairs({ "ssh", "rclone" }) do
+  for _, c in ipairs({ "ssh", "rclone", "mountpoint" }) do
     if vim.fn.executable(c) == 0 then table.insert(missing, c) end
   end
   local fusermount_ok = vim.fn.executable("fusermount3") == 1
@@ -360,7 +360,7 @@ local function do_mount_rclone(name, conn, password, mount_point, on_done)
     end)
   end
 
-  if password then
+  if password and password ~= "" then
     vim.schedule(function()
       ui.notify("mounting '" .. name .. "' ...", vim.log.levels.INFO)
     end)
@@ -490,17 +490,16 @@ local function open_ssh_terminal(name, password, force_external)
 end
 
 local function current_connection()
-  local base = data_base_dir() .. "/sshinator/mounts/"
   local cwd = vim.fn.getcwd()
-  if cwd:find(base, 1, true) == 1 then
-    return cwd:sub(#base + 1):match("^([^/]+)")
+  local buf_path = vim.fn.expand("%:p") or ""
+  for _, conn in ipairs(M._load_config().connections) do
+    local dir = mount_dir(conn.name)
+    local in_cwd = cwd == dir or cwd:sub(1, #dir + 1) == dir .. "/"
+    local in_buf = buf_path ~= "" and (buf_path == dir or buf_path:sub(1, #dir + 1) == dir .. "/")
+    if in_cwd or in_buf then
+      return conn.name
+    end
   end
-
-  local buf_path = vim.fn.expand("%:p")
-  if buf_path and buf_path ~= "" and buf_path:find(base, 1, true) == 1 then
-    return buf_path:sub(#base + 1):match("^([^/]+)")
-  end
-
   return nil
 end
 
@@ -735,10 +734,12 @@ function M.add_connection(opts)
       end
 
       local function run_test(env)
-        local test_args = { "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-p", tostring(conn.port), "-l", conn.user, conn.host, "exit" }
+        local test_args = { "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-p", tostring(conn.port), "-l", conn.user }
         if identity_file(conn) then
           vim.list_extend(test_args, { "-i", conn.identity_file })
         end
+        table.insert(test_args, conn.host)
+        table.insert(test_args, "exit")
         if env then
           table.insert(test_args, 1, "sshpass")
           table.insert(test_args, 2, "-e")
